@@ -18,21 +18,21 @@ module Notgios
         end
       end
 
-      def cd(dir = '', prettify = true)
-        run_cmd("cd #{dir}", prettify)
+      def cd(dir = '', pretty: true)
+        run_cmd("cd #{dir}", pretty)
       end
 
-      def ls(args = '', prettify = true)
-        run_cmd("ls #{args}", prettify)
+      def ls(args = '', pretty: true)
+        run_cmd("ls #{args}", pretty)
       end
 
-      def git(subcommand, args = '', prettify = true)
-        run_cmd("git #{subcommand} #{args}", prettify)
+      def git(subcommand, args = '', pretty: true)
+        run_cmd("git #{subcommand} #{args}", pretty)
       end
 
-      def run_cmd(cmd, prettify = true)
+      def run_cmd(cmd, timeout: 0.5, pretty: true)
         write(cmd)
-        prettify ? read.split("\n") : read
+        pretty ? read(timeout).split("\n") : read(timeout)
       end
 
       def terminate
