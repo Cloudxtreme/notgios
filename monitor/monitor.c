@@ -1,120 +1,101 @@
 #include <unistd.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <syslog.h>
+#include <stdio.h>
 #include <string.h>
+#include <pthread.h>
+#include "../include/uthash.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 
-#define DEFAULT_PIDFILE "/var/run/watchgios.pid"
-#define NOTGIOS_MAX_ARGS 10
+#define NOTGIOS_MONITOR_PORT 31089
+#define NOTGIOS_STATIC_BUFSIZE 256
+#define NOTGIOS_SUCCESS 0x0
+#define NOTGIOS_GENERIC_ERROR 0x01
+#define NOTGIOS_BAD_HOSTNAME 0x02
+#define NOTGIOS_SERVER_UNREACHABLE 0x04
+#define NOTGIOS_SERVER_REJECTED 0x08
 
-void launch_process();
-void child_handler(int signal);
-int check_pidfile(char *pidfile);
+int handshake(char *server_hostname, int port);
+void launch_worker_thread(void *args);
 void user_error();
 
-char *launch_path = NULL, *launch_args = NULL;
-
 int main(int argc, char **argv) {
-  int c;
-  char *pidfile = NULL;
+  int c, port = 0;
+  char *server_hostname = NULL;
 
   opterr = 0;
-  while ((c = getopt(argc, argv, "p:d:a:")) != -1) {
-    switch (c) {
-      case 'a':
-        launch_args = optarg;
-        break;
-      case 'd':
-        launch_path = optarg;
-        break;
-      case 'p':
-        pidfile = optarg;
-        break;
-      default:
-        user_error();
-        return EXIT_FAILURE;
-    }
+  switch ((c = getopt(argc, argv, "s:p:")) != -1) {
+    case 's':
+      server_hostname = optarg;
+      break;
+    case 'p':
+      port = atoi(optarg);
+      break;
+    default:
+      user_error();
+      return EXIT_FAILURE;
   }
-  if (!launch_path || !launch_args || !pidfile) user_error();
-
-  int should_run = check_pidfile(pidfile);
-  if (!should_run) return EXIT_FAILURE;
-  launch_process();
-  openlog("Notgios Watchdog", 0, 0);
-
-  struct sigaction sa;
-  sa.sa_handler = child_handler;
-  sigemptyset(&sa.sa_mask);
-  if (sigaction(SIGCHLD, &sa, 0)) {
-    syslog(LOG_ERR, "Failed to install child signal handler. No way to recover, exiting...\n");
+  if (!server_hostname || !port) {
+    user_error();
     return EXIT_FAILURE;
   }
 
-  for (;;) pause();
-}
-
-void launch_process() {
-  if (!fork()) {
-    int counter = 1;
-    char *args[NOTGIOS_MAX_ARGS];
-    args[0] = launch_path;
-
-    for (char *arg = strtok(launch_args, " "); arg && counter < NOTGIOS_MAX_ARGS - 1; arg = strtok(NULL, " ")) {
-      args[counter++] = arg;
-    }
-    args[counter] = NULL;
-
-    execv(launch_path, args);
+  switch (handshake(server_hostname, port)) {
+    case 0:
+      break;
+    case NOTGIOS_SERVER_REJECTED:
+    case NOTGIOS_BAD_HOSTNAME:
+      user_error();
+    default:
+      return EXIT_FAILURE;
   }
+
+  // We've finished the handshake, and must prepare to work.
+
 }
 
-void child_handler(int signal) {
-  int status = 0;
-  pid_t pid = waitpid((pid_t) -1, &status, WUNTRACED | WCONTINUED);
-  if (WIFEXITED(status) || WIFSIGNALED(status)) {
-    syslog(LOG_INFO, "Notgios worker killed, restarting...\n");
-    launch_process();
-  } else if (WIFSTOPPED(status)) {
-    syslog(LOG_INFO, "Notgios worker stopped, continuing...\n");
-    kill(pid, SIGCONT);
+int handshake(char *server_hostname, int port) {
+  int sockfd, actual = 0, sleep_period = 1, expected;
+  struct sockaddr_in serv_addr;
+  struct hostent *server;
+  char buffer[NOTGIOS_STATIC_BUFSIZE];
+
+  // Begin long and arduous connection process...
+  memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0) return NOTGIOS_GENERIC_ERROR;
+  server = gethostbyname(server_hostname);
+  if (!server) return NOTGIOS_BAD_HOSTNAME;
+  memset(&serv_addr, 0, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
+  serv_addr.sin_port = htons(port);
+  while (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+    sleep(sleep_period);
+    sleep_period *= 2;
+    if (sleep_period == 32) return NOTGIOS_SERVER_UNREACHABLE;
   }
-}
 
-int check_pidfile(char *pidfile) {
-  if (!access(pidfile, F_OK)) {
-    int other_pid;
-    FILE *file = fopen(pidfile, "r");
-    int retval = fscanf(file, "%d", &other_pid);
-    fclose(file);
+  // Send hello message to server.
+  sprintf(buffer, "NGS HELLO\nCMD PORT %d\n\n", NOTGIOS_MONITOR_PORT);
+  expected = strlen(buffer) + 1;
+  while (actual != expected) write(sockfd, buffer, strlen(buffer) + 1);
 
-    if (retval && retval != EOF) {
-      retval = kill(other_pid, 0);
-      if (retval && errno == ESRCH) {
-        file = fopen(pidfile, "w");
-        fprintf(file, "%hd", (short) getpid());
-        fclose(file);
-        return 1;
-      } else {
-        if (errno == EPERM) user_error();
-        return 0;
-      }
-    } else {
-      return 1;
-    }
+  // Get server's response.
+  actual = 0;
+  memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
+  while (buffer[strlen(buffer) - 1] != '\n' || buffer[strlen(buffer) - 2] != '\n') {
+    actual += read(sockfd, buffer, NOTGIOS_STATIC_BUFSIZE);
+  }
+  if (strstr(buffer, "NGS ACK") == buffer) {
+    close(sockfd);
+    return NOTGIOS_SUCCESS;
+  } else if (strstr(buffer, "NGS NACK") == buffer) {
+    close(sockfd);
+    return NOTGIOS_SERVER_REJECTED;
   } else {
-    FILE *file;
-    if (errno == ENOENT) file = fopen(pidfile, "w+");
-    else return check_pidfile(DEFAULT_PIDFILE);
-    fprintf(file, "%hd", (short) getpid());
-    fclose(file);
-    return 1;
+    close(sockfd);
+    return NOTGIOS_GENERIC_ERROR;
   }
-}
-
-void user_error() {
-  fprintf(stderr, "This utility is used internally by the Notgios host monitoring framework, and is not meant to be launched manually.\n");
-  exit(EINVAL);
 }
