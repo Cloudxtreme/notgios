@@ -56,9 +56,9 @@ module Notgios
         @in.puts(cmd)
       end
 
-      def read
+      def read(timeout = 0.5)
         buf = String.new
-        while IO.select([@out], nil, nil, 0.5)
+        while IO.select([@out], nil, nil, timeout)
           buf += @out.read_nonblock(10)
         end
         buf
