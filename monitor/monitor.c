@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,25 +9,37 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <errno.h>
+#include <syslog.h>
 
 #define NOTGIOS_MONITOR_PORT 31089
+#define NOTGIOS_ACCEPT_TIMEOUT 60
+#define NOTGIOS_READ_TIMEOUT 20
+#define NOTGIOS_WRITE_TIMEOUT 4
 #define NOTGIOS_STATIC_BUFSIZE 256
 #define NOTGIOS_SUCCESS 0x0
-#define NOTGIOS_GENERIC_ERROR 0x01
-#define NOTGIOS_BAD_HOSTNAME 0x02
-#define NOTGIOS_SERVER_UNREACHABLE 0x04
-#define NOTGIOS_SERVER_REJECTED 0x08
-#define NOTGIOS_SOCKET_FAILURE 0x10
+#define NOTGIOS_GENERIC_ERROR -0x01
+#define NOTGIOS_BAD_HOSTNAME -0x02
+#define NOTGIOS_SERVER_UNREACHABLE -0x04
+#define NOTGIOS_SERVER_REJECTED -0x08
+#define NOTGIOS_SOCKET_FAILURE -0x10
+#define NOTGIOS_SOCKET_CLOSED -0x20
 
-int handshake(char *server_hostname, int port);
-int create_server();
+int handshake(char *server_hostname, int port, int initial);
 void launch_worker_thread(void *args);
+int create_server();
+int handle_read(int fd, char *buffer, int len);
+int handle_write(int fd, char *buffer);
 void user_error();
 
+/*----- Evil but Necessary Globals -----*/
+
+int connected;
+
 int main(int argc, char **argv) {
-  int c, port = 0, server_socket = 0;
+  int c, port = 0, server_socket = 0, initial = 1;
   char *server_hostname = NULL;
 
+  connected = 0;
   opterr = 0;
   while ((c = getopt(argc, argv, "s:p:")) != -1) {
     switch (c) {
@@ -45,42 +58,86 @@ int main(int argc, char **argv) {
     user_error();
     return EXIT_FAILURE;
   }
+  openlog("Notgios Monitor", 0, 0);
 
-  // Perform the handshake with the server and act accordingly.
-  switch (handshake(server_hostname, port)) {
-    case 0:
-      break;
-    case NOTGIOS_SERVER_REJECTED:
-    case NOTGIOS_BAD_HOSTNAME:
-      user_error();
-    default:
-      return EXIT_FAILURE;
-  }
-
-  // The handshake was successful, configure the listening socket and wait on a connection.
-  switch (server_socket = create_server()) {
-    case NOTGIOS_SOCKET_FAILURE:
-      user_error();
-      return EXIT_FAILURE;
-  }
-  char buffer[NOTGIOS_STATIC_BUFSIZE];
-  struct sockaddr_in client_addr;
-  socklen_t client_len = sizeof(client_addr);
-  int socket = accept(server_socket, (struct sockaddr *) &client_addr, &client_len);
-
+  // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
-    // Logic to read jobs from server.
+    // Perform the handshake with the server and act accordingly.
+    switch (handshake(server_hostname, port, initial)) {
+      case 0:
+        break;
+      case NOTGIOS_SERVER_REJECTED:
+      case NOTGIOS_BAD_HOSTNAME:
+        user_error();
+      default:
+        syslog(LOG_ERR, "Initial handshake with server failed, exiting...\n");
+        return EXIT_FAILURE;
+    }
+    initial = 0;
+
+    // The handshake was successful, configure the listening socket and wait on a connection.
+    if ((server_socket = create_server()) == NOTGIOS_SOCKET_FAILURE) {
+      user_error();
+      syslog(LOG_ERR, "Failed to open listening socket, exiting...\n");
+      return EXIT_FAILURE;
+    }
+    syslog(LOG_INFO, "Initial handshake completed, waiting for server to connect...\n");
+    struct timeval time;
+    time.tv_sec = NOTGIOS_ACCEPT_TIMEOUT;
+    time.tv_usec = 0;
+    fd_set to_read;
+    FD_ZERO(&to_read);
+    FD_SET(server_socket, &to_read);
+    select(server_socket + 1, &to_read, NULL, NULL, &time);
+
+    // Select returned, so check if we've timed out.
+    if (!FD_ISSET(server_socket, &to_read)) {
+      syslog(LOG_ERR, "Timed out while waiting for server to make contact, exiting...\n");
+      return EXIT_FAILURE;
+    }
+
+    // We have a connection waiting, so grab it.
+    // Also, handle potential race condition (should never come up, but we know how computers are) of
+    // socket being closed in between select and accept.
+    char buffer[NOTGIOS_STATIC_BUFSIZE];
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    int socket = accept(server_socket, (struct sockaddr *) &client_addr, &client_len);
+    if (socket < 0) {
+      if (errno == EWOULDBLOCK || errno == EAGAIN) {
+        syslog(LOG_ERR, "Server closed connection while it was being opened. Exiting to start clean...\n");
+      } else {
+        syslog(LOG_ERR, "An unknown error occured while attempting to accept connection from server, exiting...\n");
+      }
+      return EXIT_FAILURE;
+    }
+    fcntl(socket, F_SETFL, O_NONBLOCK);
+    connected = 1;
+
+    // We're connected. Start reading jobs and stuff from the server.
+    while (1) {
+      // Logic to read jobs from server.
+    }
+
+    // Either our socket has been unexpectedly closed (server crashed), or we received an orderly
+    // shutdown message from the server (server was interrupted by user, or machine server was
+    // running on was shutdown). Either way, we need to start buffering output and attempt to
+    // reopen the connection with the server.
+    // TODO: Actual cleanup logic and stuff. Need to read up on socket behavior in case of
+    // unexpected shutdown.
+    connected = 0;
+    close(socket);
+    close(server_socket);
   }
 }
 
-int handshake(char *server_hostname, int port) {
-  int sockfd, actual = 0, sleep_period = 1, expected;
+int handshake(char *server_hostname, int port, int initial) {
+  int sockfd, actual = 0, sleep_period = 1;
   struct sockaddr_in serv_addr;
   struct hostent *server;
   char buffer[NOTGIOS_STATIC_BUFSIZE];
 
   // Begin long and arduous connection process...
-  memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
   sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) return NOTGIOS_GENERIC_ERROR;
   server = gethostbyname(server_hostname);
@@ -89,23 +146,22 @@ int handshake(char *server_hostname, int port) {
   serv_addr.sin_family = AF_INET;
   memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
   serv_addr.sin_port = htons(port);
+  syslog(LOG_INFO, "Attempting to connect to server...\n");
   while (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+    syslog(LOG_ERR, "Connect failed, sleeping for %d seconds...\n", sleep_period);
     sleep(sleep_period);
-    sleep_period *= 2;
-    if (sleep_period == 32) return NOTGIOS_SERVER_UNREACHABLE;
+    if (sleep_period < 32) sleep_period *= 2;
+    if (sleep_period == 32 && initial) return NOTGIOS_SERVER_UNREACHABLE;
   }
 
   // Send hello message to server.
-  sprintf(buffer, "NGS HELLO\nCMD PORT %d\n\n", NOTGIOS_MONITOR_PORT);
-  expected = strlen(buffer) + 1;
-  while (actual != expected) actual += write(sockfd, buffer, strlen(buffer) + 1);
+  memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
+  if (initial) sprintf(buffer, "NGS HELLO\nCMD PORT %d\n\n", NOTGIOS_MONITOR_PORT);
+  else sprintf(buffer, "NGS HELLO AGAIN\nCMD PORT %d\n\n", NOTGIOS_MONITOR_PORT);
+  handle_write(sockfd, buffer);
 
   // Get server's response.
-  actual = 0;
-  memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
-  while (buffer[strlen(buffer) - 1] != '\n' || buffer[strlen(buffer) - 2] != '\n') {
-    actual += read(sockfd, buffer, NOTGIOS_STATIC_BUFSIZE);
-  }
+  handle_read(sockfd, buffer, NOTGIOS_STATIC_BUFSIZE);
   if (strstr(buffer, "NGS ACK") == buffer) {
     close(sockfd);
     return NOTGIOS_SUCCESS;
@@ -118,10 +174,13 @@ int handshake(char *server_hostname, int port) {
   }
 }
 
+// Function opens a listening socket on NOTGIOS_MONITOR_PORT and marks it as
+// nonblocking.
 int create_server() {
   int server_fd;
   struct sockaddr_in serv_addr;
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  fcntl(server_fd, F_SETFL, O_NONBLOCK);
   if (server_fd < 0) return NOTGIOS_SOCKET_FAILURE;
   memset(&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
@@ -130,6 +189,68 @@ int create_server() {
   if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) return NOTGIOS_SOCKET_FAILURE;
   listen(server_fd, 10);
   return server_fd;
+}
+
+// Should be an extremely fault tolerant wrapper around read.
+// Keeps reading until encountering a double newline.
+// Zeros buffer before reading to it.
+// Can block for a maximum of NOTGIOS_READ_TIMEOUT. If no data is available at the
+// end of the timeout, assumes there is a problem with the socket, and returns
+// NOTGIOS_SOCKET_CLOSED.
+int handle_read(int fd, char *buffer, int len) {
+  int actual = 0, e_count = 0;
+  memset(buffer, 0, sizeof(char) * len);
+  while (actual < 2 || buffer[strlen(buffer) - 1] != '\n' || buffer[strlen(buffer) - 2] != '\n') {
+    fd_set to_read;
+    FD_ZERO(&to_read);
+    FD_SET(fd, &to_read);
+    struct timeval time;
+    time.tv_sec = NOTGIOS_READ_TIMEOUT;
+    time.tv_usec = 0;
+
+    select(fd + 1, &to_read, NULL, NULL, &time);
+    if (FD_ISSET(fd, &to_read)) {
+      int retval = read(fd, buffer, len);
+      if (retval >= 0) {
+        e_count = 0;
+        actual += retval;
+      } else if (e_count++ > 5) {
+        return NOTGIOS_SOCKET_CLOSED;
+      }
+    } else {
+      return NOTGIOS_SOCKET_CLOSED;
+    }
+  }
+  return actual;
+}
+
+// Should be an extremely fault tolerant wrapper around write.
+// Expects buffer to be an null terminated string, uses strlen to calculate the expected
+// number of bytes to be written, and keeps calling write until that number has been written.
+// If write fails due to blocking concerns, function assumes this means the write buffer is
+// full, and that either we're writing data too quickly, or the remote end has experienced an
+// unexpected shutdown. In an attempt to disambiguate this, function blocks for a maximum of
+// NOTGIOS_WRITE_TIMEOUT, before either writing the data or returning NOTGIOS_SOCKET_CLOSED.
+int handle_write(int fd, char *buffer) {
+  int actual = 0, expected = strlen(buffer) + 1;
+  while (actual != expected) {
+    int retval = write(fd, buffer, expected - actual);
+    if (retval >= 0) {
+      actual += retval;
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      fd_set to_write;
+      FD_ZERO(&to_write);
+      FD_SET(fd, &to_write);
+      struct timeval time;
+      time.tv_sec = NOTGIOS_WRITE_TIMEOUT;
+      time.tv_usec = 0;
+      select(fd + 1, NULL, &to_write, NULL, &time);
+      if (!FD_ISSET(fd, &to_write)) return NOTGIOS_SOCKET_CLOSED;
+    } else if (errno == EPIPE) {
+      return NOTGIOS_SOCKET_CLOSED;
+    }
+  }
+  return actual;
 }
 
 void user_error() {
