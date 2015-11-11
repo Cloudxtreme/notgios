@@ -40,8 +40,13 @@
 
 /*----- Macro Declarations -----*/
 
+// Macro zeros the given buffer, writes in the given message using sprintf, then returns
+// from the function it was called in. Uses NOTGIOS_STATIC_BUFSIZE directly as the size of
+// the buffer (instead of taking it as a parameter). Only meant to be called from the
+// handle_add, handle_pause, handle_resume, and handle_delete functions.
 #define RETURN_NACK(buf, msg)                                       \
   do {                                                              \
+    memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);          \
     sprintf(buf, msg);                                              \
     return;                                                         \
   } while (0);
@@ -178,9 +183,8 @@ int main(int argc, char **argv) {
       int retval = handle_read(socket, buffer, NOTGIOS_STATIC_BUFSIZE);
       if (retval > 0) {
         char *commands[NOTGIOS_MAX_COMMANDS];
-        memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
 
-        if (parse_commands(commands, buffer)) {
+        if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
             handle_add(commands, buffer, &threads);
@@ -226,6 +230,16 @@ int main(int argc, char **argv) {
   }
 }
 
+void *launch_worker_thread(void *voidargs) {
+  thread_args_t *args = voidargs;
+  printf("Worker launched for:\n");
+  printf("ID: %d\n", args->id);
+  printf("TYPE: %d\n", args->type);
+  printf("METRIC: %d\n", args->metric);
+  for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) printf("OPTION: %s\n", args->options[i]);
+  return NULL;
+}
+
 void handle_add(char **commands, char *reply_buf, hash_t *threads) {
   int id, freq;
   char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
@@ -269,12 +283,12 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads) {
     // This is really too long, but I love that I can do all of this on one line, so I'm leaving it on one line.
     for (char **cmd_ptr = commands + 5, *cmd = *cmd_ptr; *cmd_ptr && cmd_ptr - commands < NOTGIOS_MAX_COMMANDS; cmd_ptr++, cmd = *cmd_ptr) {
       // The structure of these if statements makes me sad. Maybe I'll refactor them sometime.
-      if (strstr("KEEPALIVE", cmd) == cmd || strstr("PIDFILE", cmd) == cmd || strstr("RUNCMD", cmd) == cmd) {
+      if (strstr(cmd, "KEEPALIVE") == cmd || strstr(cmd, "PIDFILE") == cmd || strstr(cmd, "RUNCMD") == cmd) {
         if (type != PROCESS) {
           free(arguments);
           RETURN_NACK(reply_buf, error);
         }
-      } else if (strstr("MNTPNT", cmd) == cmd) {
+      } else if (strstr(cmd, "MNTPNT") == cmd) {
         if (type != DISK) {
           free(arguments);
           RETURN_NACK(reply_buf, error);
@@ -292,6 +306,18 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads) {
   pthread_t *task = malloc(sizeof(pthread_t));
   pthread_create(task, NULL, launch_worker_thread, arguments);
   hash_put(threads, id_str, task);
+}
+
+void handle_pause(char **commands, char *reply_buf) {
+
+}
+
+void handle_resume(char **commands, char *reply_buf) {
+
+}
+
+void handle_delete(char **commands, char *reply_buf) {
+
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
