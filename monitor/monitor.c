@@ -54,7 +54,7 @@
 /*----- Function Declarations -----*/
 
 void *launch_worker_thread(void *args);
-void handle_add(char **commands, char *reply_buf, hash_t *threads);
+void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *control);
 void handle_pause(char **commands, char *reply_buf);
 void handle_resume(char **commands, char *reply_buf);
 void handle_delete(char **commands, char *reply_buf);
@@ -92,6 +92,10 @@ typedef struct thread_args {
   thread_option_t options[NOTGIOS_MAX_OPTIONS];
 } thread_args_t;
 
+typedef struct thread_control {
+  int should_run;
+} thread_control_t;
+
 /*----- Evil but Necessary Globals -----*/
 
 int connected = 0;
@@ -121,8 +125,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   openlog("Notgios Monitor", 0, 0);
-  hash_t threads;
+  hash_t threads, control;
   init_hash(&threads, free);
+  init_hash(&control, free);
 
   // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
@@ -187,7 +192,7 @@ int main(int argc, char **argv) {
         if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
-            handle_add(commands, buffer, &threads);
+            handle_add(commands, buffer, &threads, &control);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
             handle_pause(commands, buffer);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
@@ -240,7 +245,7 @@ void *launch_worker_thread(void *voidargs) {
   return NULL;
 }
 
-void handle_add(char **commands, char *reply_buf, hash_t *threads) {
+void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *control) {
   int id, freq;
   char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
   task_type_t type;

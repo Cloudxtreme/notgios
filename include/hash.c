@@ -29,8 +29,9 @@ void destroy_hash_node(hash_node_t *node, void (*destruct) (void *));
 
 int setup_hash(hash_t *table, void (*destruct) (void *)) {
   // Allocate table with calloc to allow for NULL checks.
+  int retval = pthread_rwlock_init(&table->lock, NULL);
   table->data = calloc(HASH_START_SIZE, sizeof(hash_node_t *));
-  if (table->data) {
+  if (table->data && !retval) {
     table->destruct = destruct;
     table->count = 0;
     table->size = HASH_START_SIZE;
@@ -45,6 +46,7 @@ hash_t *create_hash(void (*destruct) (void *)) {
   hash_t *table = malloc(sizeof(hash_t));
 
   if (table) {
+    table->dynamic = 1;
     if (!setup_hash(table, destruct)) {
       free(table);
       table = NULL;
@@ -56,6 +58,7 @@ hash_t *create_hash(void (*destruct) (void *)) {
 
 int init_hash(hash_t *table, void (*destruct) (void *)) {
   if (table && destruct) {
+    table->dynamic = 0;
     if (setup_hash(table, destruct)) return 1;
     else return 0;
   }
@@ -72,13 +75,17 @@ int hash_key(char *key, int size) {
 }
 
 // Function handles the rehash process encountered when a hash reaches
-// 80% capacity.
+// 80% capacity. Hate locking the entire function, but we're rehashing, so it's
+// pretty much unavoidable.
 void rehash(hash_t *table) {
+  // Acquire write-lock for hash.
+  pthread_rwlock_wrlock(&table->lock);
+
   // Allocate new table with calloc to allow for NULL checks.
-  hash_node_t **old_data = table->data;
   hash_node_t **new_data = calloc(table->size * 2, sizeof(hash_node_t *));
 
   // Copy all previous data into new, larger, hash.
+  hash_node_t **old_data = table->data;
   for(int i = 0; i < table->size; i++) {
     hash_node_t *current = old_data[i];
     while (current) {
@@ -100,42 +107,61 @@ void rehash(hash_t *table) {
   table->data = new_data;
   table->size *= 2;
   free(old_data);
+
+  // Relinquish write-lock.
+  pthread_rwlock_unlock(&table->lock);
 }
 
 // Insert data into a hash for a specific key.
 int hash_put(hash_t *table, char *key, void *data) {
   // Verify parameters.
-  if (!table || !key || !data) {
-    return 0;
-  }
+  if (!table || !key || !data) return 0;
 
   // Check if table needs a rehash.
-  if (table->count / (float) table->size > 0.8) {
-    rehash(table);
-  }
+  if (table->count / (float) table->size > 0.8) rehash(table);
 
   // Generate hash value and insert.
   int hash = hash_key(key, table->size);
 
+  // Acquire write lock.
+  pthread_rwlock_rdlock(&table->lock);
+
   // Verify that table does not already contain given key.
   if (table->data[hash]) {
-    // Check if we're dealing with a hash collision, or a repeat
-    // key.
+    // Check if we're dealing with a hash collision, or a repeat key.
     if (!find_hash_node(table->data[hash], key)) {
       // Data is new.
       hash_node_t *node = create_hash_node(key, data);
+
+      // Probably stupid, but taking the read lock first lets us get through the whole function
+      // without ever acquiring the write lock if we don't have to rehash and the data already
+      // exists.
+      pthread_rwlock_unlock(&table->lock);
+      pthread_rwlock_wrlock(&table->lock);
+
       insert_hash_node(table->data[hash], node);
       table->count++;
+      pthread_rwlock_unlock(&table->lock);
       return 1;
     } else {
       // Key already exists in table.
+      pthread_rwlock_unlock(&table->lock);
       return 0;
     }
   } else {
-    // Insert new data into table.
     hash_node_t *node = create_hash_node(key, data);
+
+    // Probably stupid, but taking the read lock first lets us get through the whole function
+    // without ever acquiring the write lock if we don't have to rehash, and the data already
+    // exists.
+    pthread_rwlock_unlock(&table->lock);
+    pthread_rwlock_wrlock(&table->lock);
+
+    // Insert new data into table.
     table->data[hash] = node;
     table->count++;
+
+    pthread_rwlock_unlock(&table->lock);
     return 1;
   }
 }
@@ -147,13 +173,19 @@ void *hash_get(hash_t *table, char *key) {
     return NULL;
   }
 
-  // Generate hash value and find data.
+  // Generate hash value.
   int hash = hash_key(key, table->size);
+
+  // Acquire read-lock and find it.
+  pthread_rwlock_rdlock(&table->lock);
   hash_node_t *found = find_hash_node(table->data[hash], key);
 
   if (found) {
-    return found->data;
+    void *data = found->data;
+    pthread_rwlock_unlock(&table->lock);
+    return data;
   } else {
+    pthread_rwlock_unlock(&table->lock);
     return NULL;
   }
 
@@ -169,18 +201,28 @@ int hash_drop(hash_t *table, char *key) {
 
   // Generate hash value and find data.
   int hash = hash_key(key, table->size);
+
+  // Acquire read lock for searching.
+  pthread_rwlock_rdlock(&table->lock);
   if (table->data[hash]) {
     if (find_hash_node(table->data[hash], key)) {
-      // Remove appropriate data.
+      // We found it. Switch locks for writing.
+      pthread_rwlock_unlock(&table->lock);
+      pthread_rwlock_wrlock(&table->lock);
+
+      // Remove the data.
       table->data[hash] = remove_hash_node(table->data[hash], key, table->destruct);
       table->count--;
+      pthread_rwlock_unlock(&table->lock);
       return 1;
     } else {
       // Key does not exist in table.
+      pthread_rwlock_unlock(&table->lock);
       return 0;
     }
   } else {
     // Key does not exist in table.
+    pthread_rwlock_unlock(&table->lock);
     return 0;
   }
 }
@@ -197,6 +239,7 @@ char **get_keys(hash_t *table) {
   char **keys = (char **) malloc(sizeof(char *) * table->count);
 
   // Iterate across each array index, and each hash_node chain.
+  pthread_rwlock_rdlock(&table->lock);
   for (int i = 0; i < table->size; i++) {
     if (table->data[i]) {
       for (hash_node_t *tmp = table->data[i]; tmp; tmp = tmp->next) {
@@ -205,6 +248,7 @@ char **get_keys(hash_t *table) {
       }
     }
   }
+  pthread_rwlock_unlock(&table->lock);
 
   return keys;
 }
@@ -216,6 +260,8 @@ void destroy_hash(hash_t *table) {
     return;
   }
 
+  // Get the write lock, just in case some poor soul is still trying to read data out.
+  pthread_rwlock_wrlock(&table->lock);
   if (table->count > 0) {
     // Destroy all necessary data.
     for (int i = 0; i < table->size; i++) {
@@ -226,7 +272,11 @@ void destroy_hash(hash_t *table) {
     }
   }
   free(table->data);
-  free(table);
+
+  // Finish the job.
+  pthread_rwlock_unlock(&table->lock);
+  pthread_rwlock_destroy(&table->lock);
+  if (table->dynamic) free(table);
 }
 
 /*---- Hash Node Functions ----*/

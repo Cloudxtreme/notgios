@@ -1,9 +1,15 @@
 #ifndef HASH_H
 #define HASH_H
 
+/*----- System Includes -----*/
+
+#include <pthread.h>
+
 /*----- Numerical Constants -----*/
 
 #define HASH_START_SIZE 10
+#define HASH_SUCCESS 0x0
+#define HASH_TOO_MANY_READS -0x01
 
 /*----- Struct Declarations -----*/
 
@@ -13,8 +19,9 @@ typedef struct hash_node hash_node_t;
 typedef struct hash {
   hash_node_t **data;
   void (*destruct) (void *);
-  int count;
-  int size;
+  int count, size, dynamic;
+  pthread_mutex_t mutex;
+  pthread_rwlock_t lock;
 } hash_t;
 
 /*----- Hash Functions -----*/
