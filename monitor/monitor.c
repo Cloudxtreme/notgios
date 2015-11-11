@@ -14,7 +14,7 @@
 
 /*----- Local Includes -----*/
 
-#include "../include/uthash.h"
+#include "../include/hash.h"
 
 /*----- Constant Declarations -----*/
 
@@ -26,6 +26,9 @@
 #define NOTGIOS_MAX_COMMANDS 16
 #define NOTGIOS_MAX_OPTIONS 4
 #define NOTGIOS_MAX_OPTION_LEN 16
+#define NOTGIOS_MAX_TYPE_LEN 16
+#define NOTGIOS_MAX_METRIC_LEN 8
+#define NOTGIOS_MAX_NUM_LEN 12
 #define NOTGIOS_SUCCESS 0x0
 #define NOTGIOS_GENERIC_ERROR -0x01
 #define NOTGIOS_BAD_HOSTNAME -0x02
@@ -46,7 +49,7 @@
 /*----- Function Declarations -----*/
 
 void *launch_worker_thread(void *args);
-void handle_add(char **commands, char *reply_buf);
+void handle_add(char **commands, char *reply_buf, hash_t *threads);
 void handle_pause(char **commands, char *reply_buf);
 void handle_resume(char **commands, char *reply_buf);
 void handle_delete(char **commands, char *reply_buf);
@@ -113,6 +116,8 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   openlog("Notgios Monitor", 0, 0);
+  hash_t threads;
+  init_hash(&threads, free);
 
   // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
@@ -178,7 +183,7 @@ int main(int argc, char **argv) {
         if (parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
-            handle_add(commands, buffer);
+            handle_add(commands, buffer, &threads);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
             handle_pause(commands, buffer);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
@@ -221,14 +226,15 @@ int main(int argc, char **argv) {
   }
 }
 
-void handle_add(char **commands, char *reply_buf) {
+void handle_add(char **commands, char *reply_buf, hash_t *threads) {
   int id, freq;
-  char *type_str, *metric_str;
+  char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
   task_type_t type;
   metric_type_t metric;
 
   // Pull out the parameters.
   sscanf(commands[1], "ID %d", &id);
+  sscanf(commands[1], "ID %s", id_str);
   sscanf(commands[2], "TYPE %s", type_str);
   sscanf(commands[3], "METRIC %s", metric_str);
   sscanf(commands[4], "FREQ %d", &freq);
@@ -283,10 +289,9 @@ void handle_add(char **commands, char *reply_buf) {
   }
 
   // Create a new thread to run the task!
-  pthread_t task;
-  pthread_create(&task, NULL, launch_worker_thread, arguments);
-
-  // TODO: Need to insert newly created thread into a hash or something here.
+  pthread_t *task = malloc(sizeof(pthread_t));
+  pthread_create(task, NULL, launch_worker_thread, arguments);
+  hash_put(threads, id_str, task);
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
