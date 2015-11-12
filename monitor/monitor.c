@@ -171,7 +171,6 @@ int main(int argc, char **argv) {
   termpipe_out = pipes[0];
   termpipe_in = pipes[1];
 
-
   // Setup signal handlers.
   int retvals[3];
   struct sigaction sa;
@@ -421,9 +420,13 @@ void handle_add(char **commands, char *reply_buf) {
   retvals[0] = hash_put(&threads, id_str, task);
   retvals[1] = hash_put(&controls, id_str, control);
 
-  // This can only happen if we've received a SIGTERM.
-  if (retvals[0] == HASH_FROZEN || retvals[1] == HASH_FROZEN) RETURN_NACK(reply_buf, "SHUTDOWN");
-
+  if (retvals[0] == HASH_FROZEN || retvals[1] == HASH_FROZEN) {
+    // This can only happen if we've received a SIGTERM.
+    RETURN_NACK(reply_buf, "SHUTDOWN");
+  } else if (retvals[0] == HASH_EXISTS || retvals[1] == HASH_EXISTS) {
+    // This shouldn't happen, but would mean that the server sent us a duplicate ID.
+    RETURN_NACK(reply_buf, "DUPLICATE_ID");
+  }
   // Write acknowledgement.
   RETURN_ACK(reply_buf);
 }
@@ -438,6 +441,9 @@ void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
   memset(id_str, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
   sscanf(cmd, "ID %s", id_str);
   control = hash_get(&controls, id_str);
+  
+  // This shouldn't happen, but would mean the server sent us a request for a nonexistent ID.
+  if (!control) RETURN_NACK(reply_buf, "NO_SUCH_ID");
 
   // Synchronize threads and set status.
   pthread_mutex_lock(&control->mutex);
