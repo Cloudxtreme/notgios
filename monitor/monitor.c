@@ -47,7 +47,14 @@
 #define RETURN_NACK(buf, msg)                                       \
   do {                                                              \
     memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);          \
-    sprintf(buf, msg);                                              \
+    sprintf(buf, "NGS NACK\nCAUSE %s\n\n", msg);                    \
+    return;                                                         \
+  } while (0);
+
+#define RETURN_ACK(buf)                                             \
+  do {                                                              \
+    memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);          \
+    sprintf(buf, "NGS ACK\n\n");                                    \
     return;                                                         \
   } while (0);
 
@@ -68,14 +75,16 @@ typedef enum {
   NONE
 } metric_type_t;
 
+typedef enum {
+  PAUSE,
+  RESUME,
+  DELETE
+} task_action_t;
+
 typedef struct thread_control {
   int paused, killed;
-  pthread_cond_t control_signal, ack_signal;
-
-  // TODO: This is kludgy and I need to find a better solution.
-  pthread_mutex_t control_dummy, ack_dummy;
-
-  pthread_rwlock_t lock;
+  pthread_cond_t signal;
+  pthread_mutex_t mutex;
 } thread_control_t;
 
 typedef char thread_option_t[NOTGIOS_MAX_OPTION_LEN];
@@ -93,9 +102,7 @@ typedef struct thread_args {
 // Thread Management Functions
 void *launch_worker_thread(void *args);
 void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *controls);
-void handle_pause(char **commands, char *reply_buf, hash_t *threads, hash_t *controls);
-void handle_resume(char **commands, char *reply_buf);
-void handle_delete(char **commands, char *reply_buf);
+void handle_reschedule(char *cmd, char *reply_buf, hash_t *threads, hash_t *controls, task_action_t action);
 
 // Network functions
 int handshake(char *server_hostname, int port, int initial);
@@ -111,6 +118,7 @@ void user_error();
 
 /*----- Evil but Necessary Globals -----*/
 
+pthread_rwlock_t connection_lock;
 int connected = 0;
 
 /*----- Function Implementations -----*/
@@ -141,6 +149,7 @@ int main(int argc, char **argv) {
   hash_t threads, controls;
   init_hash(&threads, free);
   init_hash(&controls, destroy_thread_control);
+  pthread_rwlock_init(&connection_lock, NULL);
 
   // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
@@ -194,7 +203,11 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
     fcntl(socket, F_SETFL, O_NONBLOCK);
+
+    // Mark the global connected flag to make sure workers send their findings.
+    pthread_rwlock_wrlock(&connection_lock);
     connected = 1;
+    pthread_rwlock_unlock(&connection_lock);
 
     // We're connected. Start reading jobs and stuff from the server.
     while (1) {
@@ -207,17 +220,17 @@ int main(int argc, char **argv) {
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
             handle_add(commands, buffer, &threads, &controls);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
-            handle_pause(commands, buffer, &threads, &controls);
+            handle_reschedule(commands[1], buffer, &threads, &controls, PAUSE);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
-            handle_resume(commands, buffer);
+            handle_reschedule(commands[1], buffer, &threads, &controls, RESUME);
           } else if (strstr(cmd, "NGS JOB DEL") == cmd) {
-            handle_delete(commands, buffer);
+            handle_reschedule(commands[1], buffer, &threads, &controls, DELETE);
           } else if (strstr(cmd, "NGS STILL THERE?") == cmd) {
             // Manual keepalive. I know TCP is supposed to do stuff like this on its own, but honestly it makes
             // it easier on my end to detect errors if I also do it manually.
             sprintf(buffer, "NGS STILL HERE!\n\n");
-          } else if (strstr(cmd, "NGS BYE")) {
-
+          } else if (strstr(cmd, "NGS BYE") == cmd) {
+            break;
           } else {
             // Shouldn't happen, but hey, everything that isn't supposed to happen eventually does, so there.
             sprintf(buffer, "NGS NACK\nCAUSE UNRECOGNIZED_COMMAND\n\n");
@@ -242,7 +255,10 @@ int main(int argc, char **argv) {
     // reopen the connection with the server.
     // TODO: Actual cleanup logic and stuff. Need to read up on socket behavior in case of
     // unexpected shutdown.
+    pthread_rwlock_wrlock(&connection_lock);
     connected = 0;
+    pthread_rwlock_unlock(&connection_lock);
+
     close(socket);
     close(server_socket);
   }
@@ -259,6 +275,7 @@ void *launch_worker_thread(void *voidargs) {
   return NULL;
 }
 
+// Function takes care of adding a task.
 void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *controls) {
   int id, freq;
   char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
@@ -278,14 +295,14 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *contr
   else if (!strcmp(type_str, "DISK")) type = DISK;
   else if (!strcmp(type_str, "SWAP")) type = SWAP;
   else if (!strcmp(type_str, "LOAD")) type = LOAD;
-  else RETURN_NACK(reply_buf, "NGS NACK\nCAUSE UNRECOGNIZED_TYPE\n\n");
+  else RETURN_NACK(reply_buf, "UNRECOGNIZED_TYPE");
 
   // "Convert" from string to enum value.
   if (!strcmp(metric_str, "MEMORY")) metric = MEMORY;
   else if (!strcmp(metric_str, "CPU")) metric = CPU;
   else if (!strcmp(metric_str, "IO")) metric = IO;
   else if (!strcmp(metric_str, "NONE")) metric = NONE;
-  else RETURN_NACK(reply_buf, "NGS NACK\nCAUSE UNRECOGNIZED_METRIC\n\n");
+  else RETURN_NACK(reply_buf, "UNRECOGNIZED_METRIC");
 
   // Get information ready to pass onto the thread.
   thread_args_t *arguments = calloc(1, sizeof(thread_args_t));
@@ -297,7 +314,7 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *contr
   // Look over rest of commands if applicable.
   if (type == PROCESS || type == DISK) {
     int elem = 0;
-    char *error = "NGS NACK\nCAUSE INAPPLICABLE_OPTION\n\n";
+    char *error = "INAPPLICABLE_OPTION";
 
     // This is really too long, but I love that I can do all of this on one line, so I'm leaving it on one line.
     for (char **cmd_ptr = commands + 5, *cmd = *cmd_ptr; *cmd_ptr && cmd_ptr - commands < NOTGIOS_MAX_COMMANDS; cmd_ptr++, cmd = *cmd_ptr) {
@@ -314,7 +331,7 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *contr
         }
       } else {
         free(arguments);
-        RETURN_NACK(reply_buf, "NGS NACK\nCAUSE UNRECOGNIZED_OPTION\n\n");
+        RETURN_NACK(reply_buf, "UNRECOGNIZED_OPTION");
       }
 
       memcpy(arguments->options[elem++], cmd, strlen(cmd) + 1);
@@ -333,26 +350,44 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *contr
   hash_put(threads, id_str, task);
   hash_put(controls, id_str, control);
 
-  // Write ACK.
-  sprintf(reply_buf, "NGS ACK\n\n");
+  // Write acknowledgement.
+  RETURN_ACK(reply_buf);
 }
 
-void handle_pause(char **commands, char *reply_buf, hash_t *threads, hash_t *controls) {
+// Function handles pausing, resuming, and deleting tasks.
+void handle_reschedule(char *cmd, char *reply_buf, hash_t *threads, hash_t *controls, task_action_t action) {
   char id_str[NOTGIOS_MAX_NUM_LEN];
+  thread_control_t *control;
   pthread_t *task;
 
+  // Get task to reschedule.
   memset(id_str, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
-  sscanf(commands[1], "ID %s", id_str);
-  task = hash_get(threads, id_str);
-  // TODO: Use condition variables for synchronization.
-}
+  sscanf(cmd, "ID %s", id_str);
+  control = hash_get(controls, id_str);
 
-void handle_resume(char **commands, char *reply_buf) {
-  // TODO: Write this function.
-}
+  // Synchronize threads and set status.
+  pthread_mutex_lock(&control->mutex);
+  switch (action) {
+    case PAUSE:
+      control->paused = 1;
+      break;
+    case RESUME:
+      control->paused = 0;
+      break;
+    case DELETE:
+      control->killed = 1;
+  }
+  pthread_cond_signal(&control->signal);
+  pthread_mutex_unlock(&control->mutex);
 
-void handle_delete(char **commands, char *reply_buf) {
-  // TODO: Write this function.
+  if (action == DELETE) {
+    task = hash_get(threads, id_str);
+    pthread_join(*task, NULL);
+    hash_drop(threads, id_str);
+  }
+
+  // Write acknowledgement.
+  RETURN_ACK(reply_buf);
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
@@ -489,11 +524,8 @@ thread_control_t *create_thread_control() {
   if (control) {
     control->paused = 0;
     control->killed = 0;
-    pthread_cond_init(&control->control_signal, NULL);
-    pthread_cond_init(&control->ack_signal, NULL);
-    pthread_mutex_init(&control->control_dummy, NULL);
-    pthread_mutex_init(&control->ack_dummy, NULL);
-    pthread_rwlock_init(&control->lock, NULL);
+    pthread_cond_init(&control->signal, NULL);
+    pthread_mutex_init(&control->mutex, NULL);
   }
 
   return control;
@@ -502,11 +534,8 @@ thread_control_t *create_thread_control() {
 void destroy_thread_control(void *voidarg) {
   thread_control_t *control = voidarg;
   if (control) {
-    pthread_cond_destroy(&control->control_signal);
-    pthread_cond_destroy(&control->ack_signal);
-    pthread_mutex_destroy(&control->control_dummy);
-    pthread_mutex_destroy(&control->ack_dummy);
-    pthread_rwlock_destroy(&control->lock);
+    pthread_cond_destroy(&control->signal);
+    pthread_mutex_destroy(&control->mutex);
     free(control);
   }
 }
