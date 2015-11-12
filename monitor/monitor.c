@@ -51,21 +51,6 @@
     return;                                                         \
   } while (0);
 
-/*----- Function Declarations -----*/
-
-void *launch_worker_thread(void *args);
-void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *control);
-void handle_pause(char **commands, char *reply_buf);
-void handle_resume(char **commands, char *reply_buf);
-void handle_delete(char **commands, char *reply_buf);
-
-int create_server();
-int handshake(char *server_hostname, int port, int initial);
-int handle_read(int fd, char *buffer, int len);
-int handle_write(int fd, char *buffer);
-int parse_commands(char **output, char *input);
-void user_error();
-
 /*----- Type Declarations -----*/
 
 typedef enum {
@@ -83,18 +68,46 @@ typedef enum {
   NONE
 } metric_type_t;
 
+typedef struct thread_control {
+  int paused, killed;
+  pthread_cond_t control_signal, ack_signal;
+
+  // TODO: This is kludgy and I need to find a better solution.
+  pthread_mutex_t control_dummy, ack_dummy;
+
+  pthread_rwlock_t lock;
+} thread_control_t;
+
 typedef char thread_option_t[NOTGIOS_MAX_OPTION_LEN];
 
 typedef struct thread_args {
   int id, freq;
   task_type_t type;
   metric_type_t metric;
+  thread_control_t *control;
   thread_option_t options[NOTGIOS_MAX_OPTIONS];
 } thread_args_t;
 
-typedef struct thread_control {
-  int should_run;
-} thread_control_t;
+/*----- Function Declarations -----*/
+
+// Thread Management Functions
+void *launch_worker_thread(void *args);
+void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *controls);
+void handle_pause(char **commands, char *reply_buf, hash_t *threads, hash_t *controls);
+void handle_resume(char **commands, char *reply_buf);
+void handle_delete(char **commands, char *reply_buf);
+
+// Network functions
+int handshake(char *server_hostname, int port, int initial);
+int handle_read(int fd, char *buffer, int len);
+int handle_write(int fd, char *buffer);
+
+// Utility Functions
+int create_server();
+thread_control_t *create_thread_control();
+void destroy_thread_control(void *voidarg);
+int parse_commands(char **output, char *input);
+void user_error();
 
 /*----- Evil but Necessary Globals -----*/
 
@@ -125,9 +138,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   openlog("Notgios Monitor", 0, 0);
-  hash_t threads, control;
+  hash_t threads, controls;
   init_hash(&threads, free);
-  init_hash(&control, free);
+  init_hash(&controls, destroy_thread_control);
 
   // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
@@ -192,9 +205,9 @@ int main(int argc, char **argv) {
         if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
-            handle_add(commands, buffer, &threads, &control);
+            handle_add(commands, buffer, &threads, &controls);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
-            handle_pause(commands, buffer);
+            handle_pause(commands, buffer, &threads, &controls);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
             handle_resume(commands, buffer);
           } else if (strstr(cmd, "NGS JOB DEL") == cmd) {
@@ -236,6 +249,7 @@ int main(int argc, char **argv) {
 }
 
 void *launch_worker_thread(void *voidargs) {
+  // TODO: Write a real implementation for this function.
   thread_args_t *args = voidargs;
   printf("Worker launched for:\n");
   printf("ID: %d\n", args->id);
@@ -245,7 +259,7 @@ void *launch_worker_thread(void *voidargs) {
   return NULL;
 }
 
-void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *control) {
+void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *controls) {
   int id, freq;
   char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
   task_type_t type;
@@ -307,22 +321,38 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *contr
     }
   }
 
+  // Create a control struct for the thread.
+  thread_control_t *control = create_thread_control();
+  arguments->control = control;
+
   // Create a new thread to run the task!
   pthread_t *task = malloc(sizeof(pthread_t));
   pthread_create(task, NULL, launch_worker_thread, arguments);
+
+  // Add our new thread and its controls.
   hash_put(threads, id_str, task);
+  hash_put(controls, id_str, control);
+
+  // Write ACK.
+  sprintf(reply_buf, "NGS ACK\n\n");
 }
 
-void handle_pause(char **commands, char *reply_buf) {
+void handle_pause(char **commands, char *reply_buf, hash_t *threads, hash_t *controls) {
+  char id_str[NOTGIOS_MAX_NUM_LEN];
+  pthread_t *task;
 
+  memset(id_str, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
+  sscanf(commands[1], "ID %s", id_str);
+  task = hash_get(threads, id_str);
+  // TODO: Use condition variables for synchronization.
 }
 
 void handle_resume(char **commands, char *reply_buf) {
-
+  // TODO: Write this function.
 }
 
 void handle_delete(char **commands, char *reply_buf) {
-
+  // TODO: Write this function.
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
@@ -373,33 +403,6 @@ int handshake(char *server_hostname, int port, int initial) {
   }
 }
 
-// Function opens a listening socket on NOTGIOS_MONITOR_PORT and marks it as
-// nonblocking.
-int create_server() {
-  int server_fd;
-  struct sockaddr_in serv_addr;
-  server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  fcntl(server_fd, F_SETFL, O_NONBLOCK);
-  if (server_fd < 0) return NOTGIOS_SOCKET_FAILURE;
-  memset(&serv_addr, 0, sizeof(serv_addr));
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port = htons(NOTGIOS_MONITOR_PORT);
-  if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) return NOTGIOS_SOCKET_FAILURE;
-  listen(server_fd, 10);
-  return server_fd;
-}
-
-int parse_commands(char **output, char *input) {
-  int elem = 0;
-  memset(output, 0, sizeof(char *) * NOTGIOS_MAX_COMMANDS);
-  char *current = strtok(input, "\n");
-  do {
-    if (elem == 16) return NOTGIOS_TOO_MANY_ARGS;
-    output[elem++] = current;
-  } while (current = strtok(NULL, "\n"));
-  return NOTGIOS_SUCCESS;
-}
 
 // Should be an extremely fault tolerant wrapper around read.
 // Keeps reading until encountering a double newline.
@@ -461,6 +464,62 @@ int handle_write(int fd, char *buffer) {
     }
   }
   return actual;
+}
+
+// Function opens a listening socket on NOTGIOS_MONITOR_PORT and marks it as
+// nonblocking.
+int create_server() {
+  int server_fd;
+  struct sockaddr_in serv_addr;
+  server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  fcntl(server_fd, F_SETFL, O_NONBLOCK);
+  if (server_fd < 0) return NOTGIOS_SOCKET_FAILURE;
+  memset(&serv_addr, 0, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_port = htons(NOTGIOS_MONITOR_PORT);
+  if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) return NOTGIOS_SOCKET_FAILURE;
+  listen(server_fd, 10);
+  return server_fd;
+}
+
+thread_control_t *create_thread_control() {
+  thread_control_t *control = malloc(sizeof(thread_control_t));
+
+  if (control) {
+    control->paused = 0;
+    control->killed = 0;
+    pthread_cond_init(&control->control_signal, NULL);
+    pthread_cond_init(&control->ack_signal, NULL);
+    pthread_mutex_init(&control->control_dummy, NULL);
+    pthread_mutex_init(&control->ack_dummy, NULL);
+    pthread_rwlock_init(&control->lock, NULL);
+  }
+
+  return control;
+}
+
+void destroy_thread_control(void *voidarg) {
+  thread_control_t *control = voidarg;
+  if (control) {
+    pthread_cond_destroy(&control->control_signal);
+    pthread_cond_destroy(&control->ack_signal);
+    pthread_mutex_destroy(&control->control_dummy);
+    pthread_mutex_destroy(&control->ack_dummy);
+    pthread_rwlock_destroy(&control->lock);
+    free(control);
+  }
+}
+
+int parse_commands(char **output, char *input) {
+  int elem = 0;
+  memset(output, 0, sizeof(char *) * NOTGIOS_MAX_COMMANDS);
+  char *current = strtok(input, "\n");
+  do {
+    if (elem == 16) return NOTGIOS_TOO_MANY_ARGS;
+    output[elem++] = current;
+  } while (current = strtok(NULL, "\n"));
+  return NOTGIOS_SUCCESS;
 }
 
 void user_error() {
