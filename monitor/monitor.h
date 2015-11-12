@@ -11,14 +11,14 @@
 #define NOTGIOS_ACCEPT_TIMEOUT 60
 #define NOTGIOS_READ_TIMEOUT 20
 #define NOTGIOS_WRITE_TIMEOUT 4
-#define NOTGIOS_STATIC_BUFSIZE 256
+#define NOTGIOS_STATIC_BUFSIZE 512
 #define NOTGIOS_REQUIRED_COMMANDS 5
 #define NOTGIOS_MAX_OPTIONS 4
-#define NOTGIOS_MAX_COMMANDS (NOGIOS_REQUIRED_COMMANDS + NOTGIOS_MAX_OPTIONS)
 #define NOTGIOS_MAX_OPTION_LEN 16
 #define NOTGIOS_MAX_TYPE_LEN 16
 #define NOTGIOS_MAX_METRIC_LEN 8
 #define NOTGIOS_MAX_NUM_LEN 12
+#define NOTGIOS_MAX_ARGS 32
 #define NOTGIOS_SUCCESS 0x0
 #define NOTGIOS_GENERIC_ERROR -0x01
 #define NOTGIOS_BAD_HOSTNAME -0x02
@@ -27,6 +27,7 @@
 #define NOTGIOS_SOCKET_FAILURE -0x10
 #define NOTGIOS_SOCKET_CLOSED -0x20
 #define NOTGIOS_TOO_MANY_ARGS -0x40
+#define NOTGIOS_EXEC_FAILED -0x80
 
 /*----- Type Declaractions -----*/
 
@@ -71,7 +72,8 @@ typedef struct thread_control {
 } thread_control_t;
 
 typedef struct thread_args {
-  int id, freq;
+  int freq;
+  char id[NOTGIOS_MAX_NUM_LEN];
   task_type_t type;
   metric_type_t metric;
   thread_control_t *control;

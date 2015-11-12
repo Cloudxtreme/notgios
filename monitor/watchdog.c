@@ -88,9 +88,9 @@ void child_handler(int signal) {
 
 int check_pidfile(char *pidfile) {
   if (!access(pidfile, F_OK)) {
-    int other_pid;
+    short other_pid;
     FILE *file = fopen(pidfile, "r");
-    int retval = fscanf(file, "%d", &other_pid);
+    int retval = fscanf(file, "%hd", &other_pid);
     fclose(file);
 
     if (retval && retval != EOF) {

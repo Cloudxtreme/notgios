@@ -68,7 +68,7 @@ void user_error();
 
 /*----- Evil but Necessary Globals -----*/
 
-hash_t threads, controls;
+hash_t threads, controls, children;
 pthread_rwlock_t connection_lock;
 int connected = 0, termpipe_in, termpipe_out, exiting = 0;
 
@@ -102,6 +102,7 @@ int main(int argc, char **argv) {
   openlog("Notgios Monitor", 0, 0);
   init_hash(&threads, free);
   init_hash(&controls, destroy_thread_control);
+  init_hash(&children, free);
   pthread_rwlock_init(&connection_lock, NULL);
   int pipes[2];
   if (pipe(pipes)) {
@@ -277,7 +278,8 @@ int main(int argc, char **argv) {
 void *launch_worker_thread(void *voidargs) {
   // Parse out all of the relevant arguments.
   thread_args_t *args = voidargs;
-  int id = args->id, freq = args->freq;
+  char *id = args->id;
+  int freq = args->freq;
   task_type_t type = args->type;
   metric_type_t metric = args->metric;
   thread_control_t *control = args->control;
@@ -306,14 +308,13 @@ void *launch_worker_thread(void *voidargs) {
 
 // Function takes care of adding a task.
 void handle_add(char **commands, char *reply_buf) {
-  int id, freq;
-  char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
+  int freq;
+  char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id[NOTGIOS_MAX_NUM_LEN];
   task_type_t type;
   metric_type_t metric;
 
   // Pull out the parameters.
-  sscanf(commands[1], "ID %d", &id);
-  sscanf(commands[1], "ID %s", id_str);
+  sscanf(commands[1], "ID %s", id);
   sscanf(commands[2], "TYPE %s", type_str);
   sscanf(commands[3], "METRIC %s", metric_str);
   sscanf(commands[4], "FREQ %d", &freq);
@@ -335,7 +336,7 @@ void handle_add(char **commands, char *reply_buf) {
 
   // Get information ready to pass onto the thread.
   thread_args_t *arguments = calloc(1, sizeof(thread_args_t));
-  arguments->id = id;
+  strcpy(arguments->id, id);
   arguments->freq = freq;
   arguments->type = type;
   arguments->metric = metric;
@@ -417,8 +418,8 @@ void handle_add(char **commands, char *reply_buf) {
 
   // Add our new thread and its controls.
   int retvals[2];
-  retvals[0] = hash_put(&threads, id_str, task);
-  retvals[1] = hash_put(&controls, id_str, control);
+  retvals[0] = hash_put(&threads, id, task);
+  retvals[1] = hash_put(&controls, id, control);
 
   if (retvals[0] == HASH_FROZEN || retvals[1] == HASH_FROZEN) {
     // This can only happen if we've received a SIGTERM.

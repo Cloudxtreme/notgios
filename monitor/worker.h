@@ -7,6 +7,6 @@
 
 /*----- Function Declarations -----*/
 
-void run_task(task_type_t type, metric_type_t metric, task_option_t *options, int id);
+void run_task(task_type_t type, metric_type_t metric, task_option_t *options, char *id);
 
 #endif
