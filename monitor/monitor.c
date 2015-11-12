@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -43,7 +44,7 @@
 // Macro zeros the given buffer, writes in the given message using sprintf, then returns
 // from the function it was called in. Uses NOTGIOS_STATIC_BUFSIZE directly as the size of
 // the buffer (instead of taking it as a parameter). Only meant to be called from the
-// handle_add, handle_pause, handle_resume, and handle_delete functions.
+// handle_add and handle_reschedule functions.
 #define RETURN_NACK(buf, msg)                                       \
   do {                                                              \
     memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);          \
@@ -57,6 +58,10 @@
     sprintf(buf, "NGS ACK\n\n");                                    \
     return;                                                         \
   } while (0);
+
+// This is not supposed to be a generic max function, and has tons of pitfalls.
+// Really just meant to return the greatest of two, not being incremented, ints.
+#define SIMPLE_MAX(x, y) (((x) > (y)) ? (x) : (y))
 
 /*----- Type Declarations -----*/
 
@@ -101,25 +106,31 @@ typedef struct thread_args {
 
 // Thread Management Functions
 void *launch_worker_thread(void *args);
-void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *controls);
-void handle_reschedule(char *cmd, char *reply_buf, hash_t *threads, hash_t *controls, task_action_t action);
+void handle_add(char **commands, char *reply_buf);
+void handle_reschedule(char *cmd, char *reply_buf, task_action_t action);
 
-// Network functions
+// Signal Handlers
+void handle_signal(int signo);
+void handle_term();
+void handle_child();
+
+// Network Functions
 int handshake(char *server_hostname, int port, int initial);
 int handle_read(int fd, char *buffer, int len);
 int handle_write(int fd, char *buffer);
 
 // Utility Functions
 int create_server();
+int parse_commands(char **output, char *input);
 thread_control_t *create_thread_control();
 void destroy_thread_control(void *voidarg);
-int parse_commands(char **output, char *input);
 void user_error();
 
 /*----- Evil but Necessary Globals -----*/
 
+hash_t threads, controls;
 pthread_rwlock_t connection_lock;
-int connected = 0;
+int connected = 0, termpipe_in, termpipe_out, exiting = 0;
 
 /*----- Function Implementations -----*/
 
@@ -127,6 +138,7 @@ int main(int argc, char **argv) {
   int c, port = 0, server_socket = 0, initial = 1;
   char *server_hostname = NULL;
 
+  // Parse command line args.
   opterr = 0;
   while ((c = getopt(argc, argv, "s:p:")) != -1) {
     switch (c) {
@@ -145,11 +157,44 @@ int main(int argc, char **argv) {
     user_error();
     return EXIT_FAILURE;
   }
+
+  // Initializations.
   openlog("Notgios Monitor", 0, 0);
-  hash_t threads, controls;
   init_hash(&threads, free);
   init_hash(&controls, destroy_thread_control);
   pthread_rwlock_init(&connection_lock, NULL);
+  int pipes[2];
+  if (pipe(pipes)) {
+    syslog(LOG_ERR, "Failed to open termination pipe, exiting...\n");
+    return EXIT_FAILURE;
+  }
+  termpipe_out = pipes[0];
+  termpipe_in = pipes[1];
+
+
+  // Setup signal handlers.
+  int retvals[3];
+  struct sigaction sa;
+  sa.sa_handler = SIG_IGN;
+  sa.sa_flags = 0;
+  sigemptyset(&sa.sa_mask);
+
+  // Ignore SIGINTs.
+  retvals[0] = sigaction(SIGINT, &sa, NULL);
+
+  // Handle SIGCHLD and SIGTERMs. Also, block those signals while handling them.
+  sigaddset(&sa.sa_mask, SIGTERM);
+  sa.sa_handler = handle_signal;
+  retvals[1] = sigaction(SIGCHLD, &sa, NULL);
+  sigemptyset(&sa.sa_mask);
+  sigaddset(&sa.sa_mask, SIGCHLD);
+  retvals[2] = sigaction(SIGTERM, &sa, NULL);
+
+  // Check out return values.
+  if (retvals[0] || retvals[1] || retvals[2]) {
+    syslog(LOG_ERR, "Failed to install all signal handlers, exiting...\n");
+    return EXIT_FAILURE;
+  }
 
   // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
@@ -210,27 +255,29 @@ int main(int argc, char **argv) {
     pthread_rwlock_unlock(&connection_lock);
 
     // We're connected. Start reading jobs and stuff from the server.
-    while (1) {
+    while (!exiting) {
       int retval = handle_read(socket, buffer, NOTGIOS_STATIC_BUFSIZE);
-      if (retval > 0) {
+      if (retval >= 0) {
         char *commands[NOTGIOS_MAX_COMMANDS];
 
         if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
-            handle_add(commands, buffer, &threads, &controls);
+            handle_add(commands, buffer);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
-            handle_reschedule(commands[1], buffer, &threads, &controls, PAUSE);
+            handle_reschedule(commands[1], buffer, PAUSE);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
-            handle_reschedule(commands[1], buffer, &threads, &controls, RESUME);
+            handle_reschedule(commands[1], buffer, RESUME);
           } else if (strstr(cmd, "NGS JOB DEL") == cmd) {
-            handle_reschedule(commands[1], buffer, &threads, &controls, DELETE);
+            handle_reschedule(commands[1], buffer, DELETE);
           } else if (strstr(cmd, "NGS STILL THERE?") == cmd) {
             // Manual keepalive. I know TCP is supposed to do stuff like this on its own, but honestly it makes
             // it easier on my end to detect errors if I also do it manually.
             sprintf(buffer, "NGS STILL HERE!\n\n");
           } else if (strstr(cmd, "NGS BYE") == cmd) {
             break;
+          } else if (exiting) {
+            sprintf(buffer, "NGS NACK\nCAUSE SHUTDOWN\n\n");
           } else {
             // Shouldn't happen, but hey, everything that isn't supposed to happen eventually does, so there.
             sprintf(buffer, "NGS NACK\nCAUSE UNRECOGNIZED_COMMAND\n\n");
@@ -249,18 +296,41 @@ int main(int argc, char **argv) {
       }
     }
 
-    // Either our socket has been unexpectedly closed (server crashed), or we received an orderly
+    // Either our socket has been unexpectedly closed (server crashed), we received an orderly
     // shutdown message from the server (server was interrupted by user, or machine server was
-    // running on was shutdown). Either way, we need to start buffering output and attempt to
+    // running on was shutdown), or we received a SIGTERM.
+    // If the socket closed or the serve shutdown, we need to start buffering output and attempting to
     // reopen the connection with the server.
-    // TODO: Actual cleanup logic and stuff. Need to read up on socket behavior in case of
-    // unexpected shutdown.
-    pthread_rwlock_wrlock(&connection_lock);
-    connected = 0;
-    pthread_rwlock_unlock(&connection_lock);
+    // If we received a SIGTERM, we need to stop all tasks and shutdown.
+    if (!exiting) {
+      // FIXME: I need to read up on socket behavior.
+      pthread_rwlock_wrlock(&connection_lock);
+      connected = 0;
+      pthread_rwlock_unlock(&connection_lock);
+    } else {
+      char **tasks = hash_keys(&threads);
+      for (char **current = tasks, *task_id = *current; current - tasks < threads.count; current++, task_id = *current) {
+        pthread_t *thread = hash_get(&threads, task_id);
+        thread_control_t *control = hash_get(&controls, task_id);
+
+        // Synchronize and set exit flag.
+        pthread_mutex_lock(&control->mutex);
+        control->paused = 0;
+        control->killed = 1;
+        pthread_cond_signal(&control->signal);
+        pthread_mutex_unlock(&control->mutex);
+
+        // Join with task thread.
+        pthread_join(*thread, NULL);
+      }
+      free(tasks);
+      destroy_hash(&threads);
+      destroy_hash(&controls);
+    }
 
     close(socket);
     close(server_socket);
+    if (exiting) return EXIT_SUCCESS;
   }
 }
 
@@ -276,7 +346,7 @@ void *launch_worker_thread(void *voidargs) {
 }
 
 // Function takes care of adding a task.
-void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *controls) {
+void handle_add(char **commands, char *reply_buf) {
   int id, freq;
   char type_str[NOTGIOS_MAX_TYPE_LEN], metric_str[NOTGIOS_MAX_METRIC_LEN], id_str[NOTGIOS_MAX_NUM_LEN];
   task_type_t type;
@@ -347,15 +417,19 @@ void handle_add(char **commands, char *reply_buf, hash_t *threads, hash_t *contr
   pthread_create(task, NULL, launch_worker_thread, arguments);
 
   // Add our new thread and its controls.
-  hash_put(threads, id_str, task);
-  hash_put(controls, id_str, control);
+  int retvals[2];
+  retvals[0] = hash_put(&threads, id_str, task);
+  retvals[1] = hash_put(&controls, id_str, control);
+
+  // This can only happen if we've received a SIGTERM.
+  if (retvals[0] == HASH_FROZEN || retvals[1] == HASH_FROZEN) RETURN_NACK(reply_buf, "SHUTDOWN");
 
   // Write acknowledgement.
   RETURN_ACK(reply_buf);
 }
 
 // Function handles pausing, resuming, and deleting tasks.
-void handle_reschedule(char *cmd, char *reply_buf, hash_t *threads, hash_t *controls, task_action_t action) {
+void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
   char id_str[NOTGIOS_MAX_NUM_LEN];
   thread_control_t *control;
   pthread_t *task;
@@ -363,7 +437,7 @@ void handle_reschedule(char *cmd, char *reply_buf, hash_t *threads, hash_t *cont
   // Get task to reschedule.
   memset(id_str, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
   sscanf(cmd, "ID %s", id_str);
-  control = hash_get(controls, id_str);
+  control = hash_get(&controls, id_str);
 
   // Synchronize threads and set status.
   pthread_mutex_lock(&control->mutex);
@@ -381,13 +455,47 @@ void handle_reschedule(char *cmd, char *reply_buf, hash_t *threads, hash_t *cont
   pthread_mutex_unlock(&control->mutex);
 
   if (action == DELETE) {
-    task = hash_get(threads, id_str);
+    task = hash_get(&threads, id_str);
     pthread_join(*task, NULL);
-    hash_drop(threads, id_str);
+    int retval = hash_drop(&threads, id_str);
+
+    // This can only happen if we've received a SIGTERM.
+    if (retval == HASH_FROZEN) RETURN_NACK(reply_buf, "SHUTDOWN");
   }
 
   // Write acknowledgement.
   RETURN_ACK(reply_buf);
+}
+
+void handle_signal(int signo) {
+  if (signo == SIGCHLD) handle_child();
+  else if (signo == SIGTERM) handle_term();
+}
+
+void handle_term() {
+  // We're shutting down, so freeze the hashes so they can't be modified.
+  hash_freeze(&threads);
+  hash_freeze(&controls);
+
+  // Set the exiting flag.
+  exiting = 1;
+
+  // FIXME: HACK ALERT!!!!
+  // I can't shut threads down or do anything complicated here, because I'm in a signal handler,
+  // so I need the main thread to notice and do it for me. Problem is, the main thread could be
+  // blocked on input from the server for up to 20 seconds. I like the current read behavior,
+  // so I can't really change that, so, instead I've set up a pipe that can be written to during
+  // shutdown for the sole purpose of forcing the select call in handle_read to return.
+  // It doesn't matter what's written, as long as something is, so this just spins until write
+  // reports that it's written at least one byte.
+  //
+  // If you have a better idea for how I could do this, shoot me an email at cfretz@icloud.com
+  int actual = 0;
+  while (!actual) actual += write(termpipe_in, "halt!", 6);
+}
+
+void handle_child() {
+  // TODO: Not entirely clearcut what this function should do. Figure it out.
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
@@ -452,12 +560,14 @@ int handle_read(int fd, char *buffer, int len) {
     fd_set to_read;
     FD_ZERO(&to_read);
     FD_SET(fd, &to_read);
+    FD_SET(termpipe_out, &to_read);
     struct timeval time;
     time.tv_sec = NOTGIOS_READ_TIMEOUT;
     time.tv_usec = 0;
 
-    select(fd + 1, &to_read, NULL, NULL, &time);
+    select(SIMPLE_MAX(fd, termpipe_out) + 1, &to_read, NULL, NULL, &time);
     if (FD_ISSET(fd, &to_read)) {
+      // We've received data from the server, time to read it.
       int retval = read(fd, buffer, len);
       if (retval >= 0) {
         e_count = 0;
@@ -465,6 +575,11 @@ int handle_read(int fd, char *buffer, int len) {
       } else if (e_count++ > 5) {
         return NOTGIOS_SOCKET_CLOSED;
       }
+    } else if (FD_ISSET(termpipe_out, &to_read)) {
+      // Data was written from the SIGTERM handler. We're in shutdown. Erase anything that was
+      // read off the socket (make sure we don't pass along partial data) and return immediately.
+      memset(buffer, 0, sizeof(char) * len);
+      return 0;
     } else {
       return NOTGIOS_SOCKET_CLOSED;
     }
