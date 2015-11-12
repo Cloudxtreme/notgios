@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <pthread.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -15,29 +14,9 @@
 
 /*----- Local Includes -----*/
 
+#include "monitor.h"
+#include "worker.h"
 #include "../include/hash.h"
-
-/*----- Constant Declarations -----*/
-
-#define NOTGIOS_MONITOR_PORT 31089
-#define NOTGIOS_ACCEPT_TIMEOUT 60
-#define NOTGIOS_READ_TIMEOUT 20
-#define NOTGIOS_WRITE_TIMEOUT 4
-#define NOTGIOS_STATIC_BUFSIZE 256
-#define NOTGIOS_MAX_COMMANDS 16
-#define NOTGIOS_MAX_OPTIONS 4
-#define NOTGIOS_MAX_OPTION_LEN 16
-#define NOTGIOS_MAX_TYPE_LEN 16
-#define NOTGIOS_MAX_METRIC_LEN 8
-#define NOTGIOS_MAX_NUM_LEN 12
-#define NOTGIOS_SUCCESS 0x0
-#define NOTGIOS_GENERIC_ERROR -0x01
-#define NOTGIOS_BAD_HOSTNAME -0x02
-#define NOTGIOS_SERVER_UNREACHABLE -0x04
-#define NOTGIOS_SERVER_REJECTED -0x08
-#define NOTGIOS_SOCKET_FAILURE -0x10
-#define NOTGIOS_SOCKET_CLOSED -0x20
-#define NOTGIOS_TOO_MANY_ARGS -0x40
 
 /*----- Macro Declarations -----*/
 
@@ -63,46 +42,7 @@
 // Really just meant to return the greatest of two, not being incremented, ints.
 #define SIMPLE_MAX(x, y) (((x) > (y)) ? (x) : (y))
 
-/*----- Type Declarations -----*/
-
-typedef enum {
-  PROCESS,
-  DIRECTORY,
-  DISK,
-  SWAP,
-  LOAD
-} task_type_t;
-
-typedef enum {
-  MEMORY,
-  CPU,
-  IO,
-  NONE
-} metric_type_t;
-
-typedef enum {
-  PAUSE,
-  RESUME,
-  DELETE
-} task_action_t;
-
-typedef struct thread_control {
-  int paused, killed;
-  pthread_cond_t signal;
-  pthread_mutex_t mutex;
-} thread_control_t;
-
-typedef char thread_option_t[NOTGIOS_MAX_OPTION_LEN];
-
-typedef struct thread_args {
-  int id, freq;
-  task_type_t type;
-  metric_type_t metric;
-  thread_control_t *control;
-  thread_option_t options[NOTGIOS_MAX_OPTIONS];
-} thread_args_t;
-
-/*----- Function Declarations -----*/
+/*----- Local Function Declarations -----*/
 
 // Thread Management Functions
 void *launch_worker_thread(void *args);
@@ -257,7 +197,7 @@ int main(int argc, char **argv) {
     while (!exiting) {
       int retval = handle_read(socket, buffer, NOTGIOS_STATIC_BUFSIZE);
       if (retval >= 0) {
-        char *commands[NOTGIOS_MAX_COMMANDS];
+        char *commands[NOTGIOS_REQUIRED_COMMANDS + NOTGIOS_MAX_OPTIONS];
 
         if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
@@ -325,6 +265,7 @@ int main(int argc, char **argv) {
       free(tasks);
       destroy_hash(&threads);
       destroy_hash(&controls);
+      handle_write(socket, "NGS BYE\n\n");
     }
 
     close(socket);
@@ -334,13 +275,32 @@ int main(int argc, char **argv) {
 }
 
 void *launch_worker_thread(void *voidargs) {
-  // TODO: Write a real implementation for this function.
+  // Parse out all of the relevant arguments.
   thread_args_t *args = voidargs;
-  printf("Worker launched for:\n");
-  printf("ID: %d\n", args->id);
-  printf("TYPE: %d\n", args->type);
-  printf("METRIC: %d\n", args->metric);
-  for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) printf("OPTION: %s\n", args->options[i]);
+  int id = args->id, freq = args->freq;
+  task_type_t type = args->type;
+  metric_type_t metric = args->metric;
+  thread_control_t *control = args->control;
+  task_option_t *options = args->options;
+
+  // Setup our sleep timer.
+  struct timespec time;
+  time.tv_sec = freq;
+
+  // Spin and collect data until we're killed.
+  pthread_mutex_lock(&control->mutex);
+  while (!control->killed) {
+    // Check if we've been paused, and sleep until we're rescheduled if so.
+    if (control->paused) pthread_cond_wait(&control->signal, &control->mutex);
+
+    // Make the magic happen.
+    run_task(type, metric, options, id);
+
+    // Sleep until either it's time to collect data again or we've been rescheduled.
+    pthread_cond_timedwait(&control->signal, &control->mutex, &time);
+  }
+  pthread_mutex_unlock(&control->mutex);
+
   return NULL;
 }
 
@@ -381,29 +341,69 @@ void handle_add(char **commands, char *reply_buf) {
   arguments->metric = metric;
 
   // Look over rest of commands if applicable.
-  if (type == PROCESS || type == DISK) {
+  // God this is ugly, but it's the best I can come up with.
+  if (type == PROCESS || type == DIRECTORY || type == DISK) {
     int elem = 0;
-    char *error = "INAPPLICABLE_OPTION";
 
-    // This is really too long, but I love that I can do all of this on one line, so I'm leaving it on one line.
-    for (char **cmd_ptr = commands + 5, *cmd = *cmd_ptr; *cmd_ptr && cmd_ptr - commands < NOTGIOS_MAX_COMMANDS; cmd_ptr++, cmd = *cmd_ptr) {
-      // The structure of these if statements makes me sad. Maybe I'll refactor them sometime.
-      if (strstr(cmd, "KEEPALIVE") == cmd || strstr(cmd, "PIDFILE") == cmd || strstr(cmd, "RUNCMD") == cmd) {
-        if (type != PROCESS) {
-          free(arguments);
-          RETURN_NACK(reply_buf, error);
+    // Declare arrays so that the indexes of each correspond with each other.
+    char *option_strings[] = {
+      "KEEPALIVE",
+      "PIDFILE",
+      "RUNCMD",
+      "PATH",
+      "MNTPNT"
+    };
+    task_option_type_t options[] = {
+      KEEPALIVE,
+      PIDFILE,
+      RUNCMD,
+      MNTPNT,
+      PATH
+    };
+    task_type_t option_categories[] = {
+      PROCESS,
+      PROCESS,
+      PROCESS,
+      DIRECTORY,
+      DISK
+    };
+    int num_options = sizeof(option_strings) / sizeof(option_strings[0]);
+
+    for (int i = 5; commands[i] && i < NOTGIOS_MAX_OPTIONS; i++) {
+      int found = 0;
+      char *cmd = commands[i];
+
+      for (int j = 0; j < num_options; j++) {
+        char *option_type = option_strings[j];
+
+        // Figure out which option we're using.
+        if (strstr(cmd, option_type) == cmd) {
+          // Check that the option applies to this type of task.
+          if (type != option_categories[j]) {
+            free(arguments);
+            RETURN_NACK(reply_buf, "INAPPLICABLE_OPTION");
+          }
+          found = 1;
+
+          // Everything is kosher. Assign the enum and copy over the parameter from the command.
+          task_option_t option;
+          memset(&option, 0, sizeof(task_option_t));
+          int option_len = strlen(option_type), cmd_len = strlen(cmd);
+          char *copy_start = cmd + option_len + 1;
+          int copy_len = cmd_len - option_len;
+
+          option.type = options[j];
+          memcpy(&option.value, copy_start, copy_len);
+          arguments->options[elem++] = option;
         }
-      } else if (strstr(cmd, "MNTPNT") == cmd) {
-        if (type != DISK) {
-          free(arguments);
-          RETURN_NACK(reply_buf, error);
-        }
-      } else {
+      }
+
+      if (!found) {
+        // Our option was never found! We've been given an invalid option.
+        // Should never happen.
         free(arguments);
         RETURN_NACK(reply_buf, "UNRECOGNIZED_OPTION");
       }
-
-      memcpy(arguments->options[elem++], cmd, strlen(cmd) + 1);
     }
   }
 
@@ -456,6 +456,7 @@ void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
       break;
     case DELETE:
       control->killed = 1;
+      control->paused = 0;
   }
   pthread_cond_signal(&control->signal);
   pthread_mutex_unlock(&control->mutex);
@@ -663,7 +664,7 @@ void destroy_thread_control(void *voidarg) {
 
 int parse_commands(char **output, char *input) {
   int elem = 0;
-  memset(output, 0, sizeof(char *) * NOTGIOS_MAX_COMMANDS);
+  memset(output, 0, sizeof(char *) * (NOTGIOS_REQUIRED_COMMANDS + NOTGIOS_MAX_OPTIONS));
   char *current = strtok(input, "\n");
   do {
     if (elem == 16) return NOTGIOS_TOO_MANY_ARGS;

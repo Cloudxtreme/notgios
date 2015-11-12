@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
   struct sigaction sa;
   sa.sa_handler = child_handler;
   sigemptyset(&sa.sa_mask);
-  if (sigaction(SIGCHLD, &sa, 0)) {
+  if (sigaction(SIGCHLD, &sa, NULL)) {
     syslog(LOG_ERR, "Failed to install child signal handler. No way to recover, exiting...\n");
     return EXIT_FAILURE;
   }
