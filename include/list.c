@@ -9,10 +9,10 @@
 
 /*----- Type Declarations -----*/
 
-typedef struct list_node {
+struct list_node {
   void *data;
   struct list_node *next, *prev;
-} list_node;
+};
 
 /*----- Internal Function Declarations -----*/
 
