@@ -14,69 +14,66 @@
 
 #include "worker.h"
 #include "../include/hash.h"
+#include "../include/list.h"
 
 /*----- Local Function Declaractions -----*/
 
 // Collection Type Handlers
-void handle_process(metric_type_t metric, task_option_t *options, char *id);
-void handle_directory(task_option_t *options, char *id);
-void handle_disk(metric_type_t metric, task_option_t *options, char *id);
-void handle_swap(char *id);
-void handle_load(char *id);
-void handle_total(char *id, metric_type_t metric);
+int handle_process(metric_type_t metric, task_option_t *options, char *id);
+int handle_directory(task_option_t *options, char *id);
+int handle_disk(metric_type_t metric, task_option_t *options, char *id);
+int handle_swap(char *id);
+int handle_load(char *id);
+int handle_total(char *id, metric_type_t metric);
 
 // Collection Functions
-int process_memory_collect(uint16_t pid, task_data_t *data);
-int process_cpu_collect(uint16_t pid, task_data_t *data);
-int process_io_collect(uint16_t pid, task_data_t *data);
-int directory_memory_collect(uint16_t pid, task_data_t *data);
-int disk_memory_collect(uint16_t pid, task_data_t *data);
-int swap_collect(uint16_t pid, task_data_t *data);
-int load_collect(uint16_t pid, task_data_t *data);
-int total_memory_collect(task_data_t *data);
-int total_cpu_collect(task_data_t *data);
-int total_io_collect(task_data_t *data);
+int process_memory_collect(uint16_t pid, task_report_t *data);
+int process_cpu_collect(uint16_t pid, task_report_t *data);
+int process_io_collect(uint16_t pid, task_report_t *data);
+int directory_memory_collect(uint16_t pid, task_report_t *data);
+int disk_memory_collect(uint16_t pid, task_report_t *data);
+int swap_collect(uint16_t pid, task_report_t *data);
+int load_collect(uint16_t pid, task_report_t *data);
+int total_memory_collect(task_report_t *data);
+int total_cpu_collect(task_report_t *data);
+int total_io_collect(task_report_t *data);
 
 // Utility Functions
 int check_statm();
-void init_task_data(task_data_t *data);
+void init_task_report(task_report_t *report, task_type_t type, metric_type_t metric);
 
 /*----- Evil but Necessary Globals -----*/
 
 extern hash_t threads, controls, children;
+extern list_t reports;
 extern pthread_rwlock_t connection_lock;
 extern int connected, exiting;
 
 /*----- Function Implementations -----*/
 
-void run_task(task_type_t type, metric_type_t metric, task_option_t *options, char *id) {
+int run_task(task_type_t type, metric_type_t metric, task_option_t *options, char *id) {
   switch (type) {
     case PROCESS:
-      handle_process(metric, options, id);
-      break;
+      return handle_process(metric, options, id);
     case DIRECTORY:
-      handle_directory(options, id);
-      break;
+      return handle_directory(options, id);
     case DISK:
-      handle_disk(metric, options, id);
-      break;
+      return handle_disk(metric, options, id);
     case SWAP:
-      handle_swap(id);
-      break;
+      return handle_swap(id);
     case LOAD:
-      handle_load(id);
-      break;
+      return handle_load(id);
     case TOTAL:
-      handle_total(id, metric);
+      return handle_total(id, metric);
   }
 }
 
-void handle_process(metric_type_t metric, task_option_t *options, char *id) {
+int handle_process(metric_type_t metric, task_option_t *options, char *id) {
   int keepalive = 0;
   uint16_t pid;
   char *pidfile, *runcmd;
-  task_data_t data;
-  init_task_data(&data);
+  task_report_t report;
+  init_task_report(&report, PROCESS, metric);
 
   // Pull out options.
   for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) {
@@ -97,10 +94,12 @@ void handle_process(metric_type_t metric, task_option_t *options, char *id) {
   if (keepalive) {
     FILE *file = fopen(pidfile, "w+");
     if (!file) {
-      // TODO: We cannot write to the given pidfile path. Most likely the directory just
+      // We cannot write to the given pidfile path. Most likely the directory just
       // doesn't exist, but I'm defining this as an unrecoverable error, so send a message
       // to the frontend and remove the task.
-      sprintf(data.message, "FATAL CAUSE NO_PIDFILE");
+      sprintf(report.message, "FATAL CAUSE NO_PIDFILE");
+      lpush(&reports,  &report);
+      return NOTGIOS_TASK_FATAL;
     }
 
     pid = *(int *) hash_get(&children, id);
@@ -149,65 +148,80 @@ void handle_process(metric_type_t metric, task_option_t *options, char *id) {
           // The process is running!
           pid = other_pid;
         } else {
-          // TODO: The process is not currently running. We can't collect any metrics
-          // unless it's running. Send a message to the front end letting it know the
-          // process isn't running, then return.
-          sprintf(data.message, "ERROR CAUSE PROC_NOT_RUNNING");
+          // The process is not currently running, enqueue a report saying this, then return.
+          sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
+          lpush(&reports, &report);
+          return NOTGIOS_SUCCESS;
         }
       } else {
-        // TODO: The process is not currently running. We can't collect any metrics
-        // unless it's running. Send a message to the front end letting it know the
-        // process isn't running, then return.
-        sprintf(data.message, "ERROR CAUSE PROC_NOT_RUNNING");
+        // The process is not currently running, enqueue a report saying this, then return.
+        sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
+        lpush(&reports, &report);
+        return NOTGIOS_SUCCESS;
       }
     } else {
-      // TODO: We can't access the file. I'm defining this as an unrecoverable error, so
+      // We can't access the file. I'm defining this as an unrecoverable error, so
       // send a message to the frontend, and then remove the task.
-      sprintf(data.message, "FATAL CAUSE NO_PIDFILE");
+      sprintf(report.message, "FATAL CAUSE NO_PIDFILE");
+      lpush(&reports, &report);
+      return NOTGIOS_TASK_FATAL;
     }
   }
 
-  // Collect Metrics.
+  // Collect metrics.
   int retval;
   switch (metric) {
     case MEMORY:
-      retval = process_memory_collect(pid, &data);
+      retval = process_memory_collect(pid, &report);
       if (retval == NOTGIOS_NOPROC && keepalive) {
-        if (check_statm()) sprintf(data.message, "ERROR CAUSE PROC_NOT_RUNNING");
-        else sprintf(data.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
+        if (check_statm()) {
+          // FIXME: This was written before the child handler was figured out. Could need to revisit this
+          // after implementing the child handler.
+          // Since we're keeping alive, this most likely means that the user gave us an invalid command.
+          // Send an error message, and the frontend will eventually kill the task if necessary.
+          sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
+        } else {
+          // We can't even read from /proc/self/statm, which should be guaranteed to work on any version of
+          // linux that supports statm at all. Let the front end know that we're running on an unsupported
+          // distro.
+          sprintf(report.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
+          return NOTGIOS_TASK_FATAL;
+        } 
       }
       break;
     case CPU:
-      retval = process_cpu_collect(pid, &data);
+      retval = process_cpu_collect(pid, &report);
       break;
     case IO:
-      retval = process_io_collect(pid, &data);
+      retval = process_io_collect(pid, &report);
   }
 
-  // TODO: Enqueue metrics for sending.
+  // Enqueue metrics for sending.
+  lpush(&reports, &report);
+  return NOTGIOS_SUCCESS;
 }
 
-void handle_directory(task_option_t *options, char *id) {
+int handle_directory(task_option_t *options, char *id) {
   // TODO: Write this function.
 }
 
-void handle_disk(metric_type_t metric, task_option_t *options, char *id) {
+int handle_disk(metric_type_t metric, task_option_t *options, char *id) {
   // TODO: Write this function.
 }
 
-void handle_swap(char *id) {
+int handle_swap(char *id) {
   // TODO: Write this function.
 }
 
-void handle_load(char *id) {
+int handle_load(char *id) {
   // TODO: Write this function.
 }
 
-void handle_total(char *id, metric_type_t metric) {
+int handle_total(char *id, metric_type_t metric) {
   // TODO: Write this function.
 }
 
-int process_memory_collect(uint16_t pid, task_data_t *data) {
+int process_memory_collect(uint16_t pid, task_report_t *data) {
   char path[NOTGIOS_MAX_PROC_LEN];
   sprintf(path, "/proc/%u/statm", pid);
   FILE *statm = fopen(path, "r");
@@ -222,39 +236,39 @@ int process_memory_collect(uint16_t pid, task_data_t *data) {
   }
 }
 
-int process_cpu_collect(uint16_t pid, task_data_t *data) {
+int process_cpu_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
 }
 
-int process_io_collect(uint16_t pid, task_data_t *data) {
+int process_io_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
 }
 
-int directory_memory_collect(uint16_t pid, task_data_t *data) {
+int directory_memory_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
 }
 
-int disk_memory_collect(uint16_t pid, task_data_t *data) {
+int disk_memory_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
 }
 
-int swap_collect(uint16_t pid, task_data_t *data) {
+int swap_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
 }
 
-int load_collect(uint16_t pid, task_data_t *data) {
+int load_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
 }
 
-int total_memory_collect(task_data_t *data) {
+int total_memory_collect(task_report_t *data) {
   // TODO: Write this function.
 }
 
-int total_cpu_collect(task_data_t *data) {
+int total_cpu_collect(task_report_t *data) {
   // TODO: Write this function.
 }
 
-int total_io_collect(task_data_t *data) {
+int total_io_collect(task_report_t *data) {
   // TODO: Write this function.
 }
 
@@ -262,11 +276,11 @@ int check_statm() {
   return !access("/proc/self/statm", F_OK);
 }
 
-void init_task_data(task_data_t *data) {
-  if (data) {
-    memset(data->id, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
-    memset(data->message, 0, sizeof(char) * NOTGIOS_ERROR_BUFSIZE);
-    data->percentage = 0;
-    data->value = 0;
+void init_task_report(task_report_t *report, task_type_t type, metric_type_t metric) {
+  if (report) {
+    memset(report->id, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
+    memset(report->message, 0, sizeof(char) * NOTGIOS_ERROR_BUFSIZE);
+    report->percentage = 0;
+    report->value = 0;
   }
 }

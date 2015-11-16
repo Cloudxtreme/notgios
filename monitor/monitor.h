@@ -69,7 +69,7 @@ typedef struct task_option {
 } task_option_t;
 
 typedef struct thread_control {
-  int paused, killed;
+  int paused, killed, dropped;
   pthread_cond_t signal;
   pthread_mutex_t mutex;
 } thread_control_t;

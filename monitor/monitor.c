@@ -17,6 +17,7 @@
 #include "monitor.h"
 #include "worker.h"
 #include "../include/hash.h"
+#include "../include/list.h"
 
 /*----- Macro Declarations -----*/
 
@@ -42,6 +43,13 @@
 // Really just meant to return the greatest of two, not being incremented, ints.
 #define SIMPLE_MAX(x, y) (((x) > (y)) ? (x) : (y))
 
+// Declare ourselves a logging function based on our environment.
+#ifdef DEBUG
+#define write_log(priority, ...) fprintf(stderr, __VA_ARGS__)
+#else
+#define write_log(priority, ...) syslog(priority, __VA_ARGS__)
+#endif
+
 /*----- Local Function Declarations -----*/
 
 // Thread Management Functions
@@ -65,11 +73,13 @@ int create_server();
 int parse_commands(char **output, char *input);
 thread_control_t *create_thread_control();
 void destroy_thread_control(void *voidarg);
+void remove_dead();
 void user_error();
 
 /*----- Evil but Necessary Globals -----*/
 
 hash_t threads, controls, children;
+list_t reports;
 pthread_rwlock_t connection_lock;
 int connected = 0, termpipe_in, termpipe_out, exiting = 0;
 
@@ -100,22 +110,28 @@ int main(int argc, char **argv) {
   }
 
   // Initializations.
-  // TODO: Need to add a queue here for sending reports.
+#ifndef DEBUG
   openlog("Notgios Monitor", 0, 0);
-  init_hash(&threads, free);
-  init_hash(&controls, destroy_thread_control);
-  init_hash(&children, free);
+#endif
+  int retvals[4];
+  retvals[0] = init_hash(&threads, free);
+  retvals[1] = init_hash(&controls, destroy_thread_control);
+  retvals[2] = init_hash(&children, free);
+  retvals[3] = init_list(&reports, sizeof(task_report_t), free);
+  if (retvals[0] || retvals[1] || retvals[2] || retvals[3]) {
+    write_log(LOG_ERR, "Failed to initialize necessary tables and lists, exiting...\n");
+    return EXIT_FAILURE;
+  }
   pthread_rwlock_init(&connection_lock, NULL);
   int pipes[2];
   if (pipe(pipes)) {
-    syslog(LOG_ERR, "Failed to open termination pipe, exiting...\n");
+    write_log(LOG_ERR, "Failed to open termination pipe, exiting...\n");
     return EXIT_FAILURE;
   }
   termpipe_out = pipes[0];
   termpipe_in = pipes[1];
 
   // Setup signal handlers.
-  int retvals[3];
   struct sigaction sa;
   sa.sa_handler = SIG_IGN;
   sa.sa_flags = 0;
@@ -134,7 +150,7 @@ int main(int argc, char **argv) {
 
   // Check out return values.
   if (retvals[0] || retvals[1] || retvals[2]) {
-    syslog(LOG_ERR, "Failed to install all signal handlers, exiting...\n");
+    write_log(LOG_ERR, "Failed to install all signal handlers, exiting...\n");
     return EXIT_FAILURE;
   }
 
@@ -148,7 +164,7 @@ int main(int argc, char **argv) {
       case NOTGIOS_BAD_HOSTNAME:
         user_error();
       default:
-        syslog(LOG_ERR, "Initial handshake with server failed, exiting...\n");
+        write_log(LOG_ERR, "Initial handshake with server failed, exiting...\n");
         return EXIT_FAILURE;
     }
     initial = 0;
@@ -156,10 +172,10 @@ int main(int argc, char **argv) {
     // The handshake was successful, configure the listening socket and wait on a connection.
     if ((server_socket = create_server()) == NOTGIOS_SOCKET_FAILURE) {
       user_error();
-      syslog(LOG_ERR, "Failed to open listening socket, exiting...\n");
+      write_log(LOG_ERR, "Failed to open listening socket, exiting...\n");
       return EXIT_FAILURE;
     }
-    syslog(LOG_INFO, "Initial handshake completed, waiting for server to connect...\n");
+    write_log(LOG_INFO, "Initial handshake completed, waiting for server to connect...\n");
     struct timeval time;
     time.tv_sec = NOTGIOS_ACCEPT_TIMEOUT;
     time.tv_usec = 0;
@@ -170,7 +186,7 @@ int main(int argc, char **argv) {
 
     // Select returned, so check if we've timed out.
     if (!FD_ISSET(server_socket, &to_read)) {
-      syslog(LOG_ERR, "Timed out while waiting for server to make contact, exiting...\n");
+      write_log(LOG_ERR, "Timed out while waiting for server to make contact, exiting...\n");
       return EXIT_FAILURE;
     }
 
@@ -183,9 +199,9 @@ int main(int argc, char **argv) {
     int socket = accept(server_socket, (struct sockaddr *) &client_addr, &client_len);
     if (socket < 0) {
       if (errno == EWOULDBLOCK || errno == EAGAIN) {
-        syslog(LOG_ERR, "Server closed connection while it was being opened. Exiting to start clean...\n");
+        write_log(LOG_ERR, "Server closed connection while it was being opened. Exiting to start clean...\n");
       } else {
-        syslog(LOG_ERR, "An unknown error occured while attempting to accept connection from server, exiting...\n");
+        write_log(LOG_ERR, "An unknown error occured while attempting to accept connection from server, exiting...\n");
       }
       return EXIT_FAILURE;
     }
@@ -241,6 +257,10 @@ int main(int argc, char **argv) {
         // Either way, due to the keepalive, except in exceptional circumstances when we wouldn't be able to write
         // data anyways, this is gauranteed to be run at least once every 10 seconds.
         send_reports();
+
+        // If any tasks encountered unrecoverable errors, a message has already been sent to the front end, so remove
+        // the task from the tables.
+        remove_dead();
       } else {
         break;
       }
@@ -306,7 +326,15 @@ void *launch_worker_thread(void *voidargs) {
     if (control->paused) pthread_cond_wait(&control->signal, &control->mutex);
 
     // Make the magic happen.
-    run_task(type, metric, options, id);
+    int retval = run_task(type, metric, options, id);
+
+    // If we encountered a fatal error, message to front end has already been queued, so
+    // remove the task.
+    if (retval == NOTGIOS_TASK_FATAL) {
+      control->dropped = 1;
+      pthread_mutex_unlock(&control->mutex);
+      return NULL;
+    }
 
     // Sleep until either it's time to collect data again or we've been rescheduled.
     pthread_cond_timedwait(&control->signal, &control->mutex, &time);
@@ -517,7 +545,11 @@ void handle_child() {
 }
 
 void send_reports() {
-  // TODO: Write this function.
+  while (reports.count > 0) {
+    task_report_t report;
+    rpop(&reports, &report);
+    // TODO: Finish this function.
+  }
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
@@ -540,9 +572,9 @@ int handshake(char *server_hostname, int port, int initial) {
   serv_addr.sin_family = AF_INET;
   memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
   serv_addr.sin_port = htons(port);
-  syslog(LOG_INFO, "Attempting to connect to server...\n");
+  write_log(LOG_INFO, "Attempting to connect to server...\n");
   while (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-    syslog(LOG_ERR, "Connect failed, sleeping for %d seconds...\n", sleep_period);
+    write_log(LOG_ERR, "Connect failed, sleeping for %d seconds...\n", sleep_period);
     sleep(sleep_period);
     if (sleep_period < 32) sleep_period *= 2;
     if (sleep_period == 32 && initial) return NOTGIOS_SERVER_UNREACHABLE;
@@ -686,6 +718,27 @@ int parse_commands(char **output, char *input) {
     output[elem++] = current;
   } while (current = strtok(NULL, "\n"));
   return NOTGIOS_SUCCESS;
+}
+
+void remove_dead() {
+  char **tasks = hash_keys(&threads);
+  for (char **current = tasks, *task_id = *current; current - tasks < threads.count; current++, task_id = *current) {
+    pthread_t *thread = hash_get(&threads, task_id);
+    thread_control_t *control = hash_get(&controls, task_id);
+
+    // Not necessary to acquire lock. We only remove the task if dropped is set, in which case the thread is no longer
+    // running, and if we happen to read dropped while it's being set, it'll be cleaned up next round.
+    // Futhermore, we're the only thread that removes tasks.
+    if (control->dropped) {
+      pthread_join(*thread, NULL);
+      hash_drop(&threads, task_id);
+      hash_drop(&controls, task_id);
+
+      // FIXME: Hadn't written child handler when this was implemented. Should look into this again afterwards.
+      hash_drop(&children, task_id);
+    }
+  }
+  free(tasks);
 }
 
 void user_error() {
