@@ -55,6 +55,7 @@ void handle_term();
 void handle_child();
 
 // Network Functions
+void send_reports();
 int handshake(char *server_hostname, int port, int initial);
 int handle_read(int fd, char *buffer, int len);
 int handle_write(int fd, char *buffer);
@@ -99,6 +100,7 @@ int main(int argc, char **argv) {
   }
 
   // Initializations.
+  // TODO: Need to add a queue here for sending reports.
   openlog("Notgios Monitor", 0, 0);
   init_hash(&threads, free);
   init_hash(&controls, destroy_thread_control);
@@ -230,7 +232,15 @@ int main(int argc, char **argv) {
           sprintf(buffer, "NGS NACK\nCAUSE COMMAND_TOO_LONG\n\n");
         }
 
+        // Write our reply.
         handle_write(socket, buffer);
+
+        // Check the report queue for entries and send them if they exist.
+        // This should probably be handled by a dedicated thread, but having two threads writing into the same socket
+        // is almost impossible to get right, and having two sockets requires significantly more error handling.
+        // Either way, due to the keepalive, except in exceptional circumstances when we wouldn't be able to write
+        // data anyways, this is gauranteed to be run at least once every 10 seconds.
+        send_reports();
       } else {
         break;
       }
@@ -504,6 +514,10 @@ void handle_term() {
 
 void handle_child() {
   // TODO: Not entirely clearcut what this function should do. Figure it out.
+}
+
+void send_reports() {
+  // TODO: Write this function.
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
