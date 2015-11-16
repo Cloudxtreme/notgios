@@ -24,7 +24,6 @@ typedef struct hash {
   hash_node_t **data;
   void (*destruct) (void *);
   int count, size, dynamic, frozen;
-  pthread_mutex_t mutex;
   pthread_rwlock_t lock;
 } hash_t;
 

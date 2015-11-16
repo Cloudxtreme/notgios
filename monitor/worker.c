@@ -75,6 +75,8 @@ void handle_process(metric_type_t metric, task_option_t *options, char *id) {
   int keepalive = 0;
   uint16_t pid;
   char *pidfile, *runcmd;
+  task_data_t data;
+  init_task_data(&data);
 
   // Pull out options.
   for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) {
@@ -98,6 +100,7 @@ void handle_process(metric_type_t metric, task_option_t *options, char *id) {
       // TODO: We cannot write to the given pidfile path. Most likely the directory just
       // doesn't exist, but I'm defining this as an unrecoverable error, so send a message
       // to the frontend and remove the task.
+      sprintf(data.message, "FATAL CAUSE NO_PIDFILE");
     }
 
     pid = *(int *) hash_get(&children, id);
@@ -149,28 +152,29 @@ void handle_process(metric_type_t metric, task_option_t *options, char *id) {
           // TODO: The process is not currently running. We can't collect any metrics
           // unless it's running. Send a message to the front end letting it know the
           // process isn't running, then return.
+          sprintf(data.message, "ERROR CAUSE PROC_NOT_RUNNING");
         }
       } else {
         // TODO: The process is not currently running. We can't collect any metrics
         // unless it's running. Send a message to the front end letting it know the
         // process isn't running, then return.
+        sprintf(data.message, "ERROR CAUSE PROC_NOT_RUNNING");
       }
     } else {
       // TODO: We can't access the file. I'm defining this as an unrecoverable error, so
       // send a message to the frontend, and then remove the task.
+      sprintf(data.message, "FATAL CAUSE NO_PIDFILE");
     }
   }
 
   // Collect Metrics.
   int retval;
-  task_data_t data;
-  init_task_data(&data);
   switch (metric) {
     case MEMORY:
       retval = process_memory_collect(pid, &data);
       if (retval == NOTGIOS_NOPROC && keepalive) {
         if (check_statm()) sprintf(data.message, "ERROR CAUSE PROC_NOT_RUNNING");
-        else sprintf(data.message, "ERROR CAUSE UNSUPPORTED_DISTRO");
+        else sprintf(data.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
       }
       break;
     case CPU:

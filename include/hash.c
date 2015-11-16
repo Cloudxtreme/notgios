@@ -37,9 +37,8 @@ int setup_hash(hash_t *table, void (*destruct) (void *)) {
     table->frozen = 0;
     table->size = HASH_START_SIZE;
     return 1;
-  } else {
-    return 0;
   }
+  return 0;
 }
 
 // Function handles creation of a hash struct.
@@ -63,7 +62,7 @@ int init_hash(hash_t *table, void (*destruct) (void *)) {
     if (setup_hash(table, destruct)) return HASH_SUCCESS;
     else return HASH_NOMEM;
   }
-  return 0;
+  return HASH_INVAL;
 }
 
 // Function handles creation of a hash value for a given string.
