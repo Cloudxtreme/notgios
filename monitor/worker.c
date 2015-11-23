@@ -77,16 +77,19 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
 
   // Pull out options.
   for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) {
-    task_option_t option = options[i];
-    switch (option.type) {
+    task_option_t *option = &options[i];
+    switch (option->type) {
       case KEEPALIVE:
-        keepalive = strcmp(option.value, "TRUE") ? 0 : 1;
+        keepalive = strcmp(option->value, "TRUE") ? 0 : 1;
         break;
       case PIDFILE:
-        pidfile = option.value;
+        pidfile = option->value;
         break;
       case RUNCMD:
-        runcmd = option.value;
+        runcmd = option->value;
+        break;
+      case EMPTY:
+        break;
     }
   }
 
@@ -102,8 +105,9 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
       return NOTGIOS_TASK_FATAL;
     }
 
-    pid = *(int *) hash_get(&children, id);
-    if (pid) {
+    int *tmp_pid = hash_get(&children, id);
+    if (tmp_pid) {
+      pid = *tmp_pid;
       fprintf(file, "%u", pid);
     } else {
       pid = fork();
@@ -125,7 +129,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
 
         // Get our base command and arguments.
         char *path = strtok(runcmd, "\t"), *arg;
-        while ((arg = strtok(NULL, "\n")) && elem < NOTGIOS_MAX_ARGS) args[elem++] = arg;
+        while ((arg = strtok(NULL, "\t")) && elem < NOTGIOS_MAX_ARGS) args[elem++] = arg;
 
         // Moment of truth!
         execv(path, args);
@@ -282,5 +286,7 @@ void init_task_report(task_report_t *report, task_type_t type, metric_type_t met
     memset(report->message, 0, sizeof(char) * NOTGIOS_ERROR_BUFSIZE);
     report->percentage = 0;
     report->value = 0;
+    report->type = EMPTY;
+    report->metric = NONE;
   }
 }

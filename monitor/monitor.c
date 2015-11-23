@@ -139,17 +139,18 @@ int main(int argc, char **argv) {
 
   // Ignore SIGINTs.
   retvals[0] = sigaction(SIGINT, &sa, NULL);
+  retvals[1] = sigaction(SIGPIPE, &sa, NULL);
 
   // Handle SIGCHLD and SIGTERMs. Also, block those signals while handling them.
   sigaddset(&sa.sa_mask, SIGTERM);
   sa.sa_handler = handle_signal;
-  retvals[1] = sigaction(SIGCHLD, &sa, NULL);
+  retvals[2] = sigaction(SIGCHLD, &sa, NULL);
   sigemptyset(&sa.sa_mask);
   sigaddset(&sa.sa_mask, SIGCHLD);
-  retvals[2] = sigaction(SIGTERM, &sa, NULL);
+  retvals[3] = sigaction(SIGTERM, &sa, NULL);
 
   // Check out return values.
-  if (retvals[0] || retvals[1] || retvals[2]) {
+  if (retvals[0] || retvals[1] || retvals[2] || retvals[3]) {
     write_log(LOG_ERR, "Failed to install all signal handlers, exiting...\n");
     return EXIT_FAILURE;
   }
@@ -206,6 +207,7 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
     fcntl(socket, F_SETFL, O_NONBLOCK);
+    write_log(LOG_INFO, "Connected to server...\n");
 
     // Mark the global connected flag to make sure workers send their findings.
     pthread_rwlock_wrlock(&connection_lock);
@@ -221,23 +223,30 @@ int main(int argc, char **argv) {
         if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
+            write_log(LOG_INFO, "Received an add message...\n");
             handle_add(commands, buffer);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
+            write_log(LOG_INFO, "Received a pause message...\n");
             handle_reschedule(commands[1], buffer, PAUSE);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
+            write_log(LOG_INFO, "Received a resume message...\n");
             handle_reschedule(commands[1], buffer, RESUME);
           } else if (strstr(cmd, "NGS JOB DEL") == cmd) {
+            write_log(LOG_INFO, "Received a delete message...\n");
             handle_reschedule(commands[1], buffer, DELETE);
           } else if (strstr(cmd, "NGS STILL THERE?") == cmd) {
             // Manual keepalive. I know TCP is supposed to do stuff like this on its own, but honestly it makes
             // it easier on my end to detect errors if I also do it manually.
+            write_log(LOG_INFO, "Received keepalive message...\n");
             sprintf(buffer, "NGS STILL HERE!\n\n");
           } else if (strstr(cmd, "NGS BYE") == cmd) {
+            write_log(LOG_INFO, "Server send a shutdown message, beginning reconnect procedures...\n");
             break;
           } else if (exiting) {
             sprintf(buffer, "NGS NACK\nCAUSE SHUTDOWN\n\n");
           } else {
             // Shouldn't happen, but hey, everything that isn't supposed to happen eventually does, so there.
+            write_log(LOG_ERR, "Received an invalid message, discarding...\n");
             sprintf(buffer, "NGS NACK\nCAUSE UNRECOGNIZED_COMMAND\n\n");
           }
         } else {
@@ -262,6 +271,7 @@ int main(int argc, char **argv) {
         // the task from the tables.
         remove_dead();
       } else {
+        write_log(LOG_ERR, "Error reading from socket...\n");
         break;
       }
     }
@@ -278,6 +288,7 @@ int main(int argc, char **argv) {
       connected = 0;
       pthread_rwlock_unlock(&connection_lock);
     } else {
+      write_log(LOG_INFO, "Shutdown was initiated. Killing tasks...\n");
       char **tasks = hash_keys(&threads);
       for (char **current = tasks, *task_id = *current; current - tasks < threads.count; current++, task_id = *current) {
         pthread_t *thread = hash_get(&threads, task_id);
@@ -292,7 +303,9 @@ int main(int argc, char **argv) {
 
         // Join with task thread.
         pthread_join(*thread, NULL);
+        write_log(LOG_INFO, "Killed a task...\n");
       }
+      write_log(LOG_INFO, "Tasks have exited, proceeding to shutdown...\n");
       free(tasks);
       destroy_hash(&threads);
       destroy_hash(&controls);
@@ -320,6 +333,7 @@ void *launch_worker_thread(void *voidargs) {
   time.tv_sec = freq;
 
   // Spin and collect data until we're killed.
+  write_log(LOG_INFO, "Task #%s successfully launched!\n", id);
   pthread_mutex_lock(&control->mutex);
   while (!control->killed) {
     // Check if we've been paused, and sleep until we're rescheduled if so.
@@ -331,10 +345,12 @@ void *launch_worker_thread(void *voidargs) {
     // If we encountered a fatal error, message to front end has already been queued, so
     // remove the task.
     if (retval == NOTGIOS_TASK_FATAL) {
+      write_log(LOG_ERR, "Task #%s encountered a fatal error, exiting...\n", id);
       control->dropped = 1;
       pthread_mutex_unlock(&control->mutex);
       return NULL;
     }
+    write_log(LOG_INFO, "Task #%s finished collecting data...\n", id);
 
     // Sleep until either it's time to collect data again or we've been rescheduled.
     pthread_cond_timedwait(&control->signal, &control->mutex, &time);
@@ -408,7 +424,7 @@ void handle_add(char **commands, char *reply_buf) {
     };
     int num_options = sizeof(option_strings) / sizeof(option_strings[0]);
 
-    for (int i = 5; commands[i] && i < NOTGIOS_MAX_OPTIONS; i++) {
+    for (int i = 5; commands[i] && i < 5 + NOTGIOS_MAX_OPTIONS; i++) {
       int found = 0;
       char *cmd = commands[i];
 
@@ -445,6 +461,7 @@ void handle_add(char **commands, char *reply_buf) {
       }
     }
   }
+  write_log(LOG_INFO, "Finished parsing options. Starting the task...\n");
 
   // Create a control struct for the thread.
   thread_control_t *control = create_thread_control();
@@ -510,6 +527,7 @@ void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
   }
 
   // Write acknowledgement.
+  write_log(LOG_INFO, "Task successfully rescheduled...\n");
   RETURN_ACK(reply_buf);
 }
 
@@ -693,6 +711,7 @@ thread_control_t *create_thread_control() {
   if (control) {
     control->paused = 0;
     control->killed = 0;
+    control->dropped = 0;
     pthread_cond_init(&control->signal, NULL);
     pthread_mutex_init(&control->mutex, NULL);
   }
@@ -730,6 +749,7 @@ void remove_dead() {
     // running, and if we happen to read dropped while it's being set, it'll be cleaned up next round.
     // Futhermore, we're the only thread that removes tasks.
     if (control->dropped) {
+      write_log(LOG_INFO, "Removing a dead task...\n");
       pthread_join(*thread, NULL);
       hash_drop(&threads, task_id);
       hash_drop(&controls, task_id);

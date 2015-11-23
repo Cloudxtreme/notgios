@@ -15,7 +15,7 @@
 #define NOTGIOS_ERROR_BUFSIZE 64
 #define NOTGIOS_REQUIRED_COMMANDS 5
 #define NOTGIOS_MAX_OPTIONS 4
-#define NOTGIOS_MAX_OPTION_LEN 16
+#define NOTGIOS_MAX_OPTION_LEN 128
 #define NOTGIOS_MAX_TYPE_LEN 16
 #define NOTGIOS_MAX_METRIC_LEN 8
 #define NOTGIOS_MAX_NUM_LEN 12
@@ -43,13 +43,14 @@ typedef enum {
 } task_type_t;
 
 typedef enum {
+  NONE,
   MEMORY,
   CPU,
   IO,
-  NONE
 } metric_type_t;
 
 typedef enum {
+  EMPTY,
   KEEPALIVE,
   PIDFILE,
   RUNCMD,
