@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <syslog.h>
 #include <time.h>
+#include <sys/wait.h>
 
 /*----- Local Includes -----*/
 
@@ -554,8 +555,37 @@ void handle_term() {
   while (!actual) actual += write(termpipe_in, "halt!", 6);
 }
 
+// Function handles removing dead children from the children hash so that they'll be restarted.
+// TODO: This is a critical function, and I'm not convinced that this behavior alone is enough.
+// Revisit at some point.
 void handle_child() {
-  // TODO: Not entirely clearcut what this function should do. Figure it out.
+  int status = 0;
+  pid_t pid = waitpid((pid_t) -1, &status, WUNTRACED | WCONTINUED);
+
+  // Iterate across all of the current child processes to find the one we're being signaled about.
+  char **tasks = hash_keys(&children), *id = NULL;
+  for (char **current = tasks, *task_id = *current; current - tasks < children.count; current++, task_id = *current) {
+    uint16_t *tmp_pid = hash_get(&children, task_id);
+    if (*tmp_pid == pid) {
+      id = task_id;
+      break;
+    }
+  }
+
+  if (!id) {
+    free(tasks);
+    write_log(LOG_ERR, "Monitor: Was sent a SIGCHLD, but can't find it???\n");
+    return;
+  }
+
+  if (WIFEXITED(status) || WIFSIGNALED(status)) {
+    write_log(LOG_INFO, "Child for task %s either crashed, exited, or was killed. Marking for restart...\n", id);
+    hash_drop(&children, id);
+  } else if (WIFSTOPPED(status)) {
+    write_log(LOG_INFO, "Child for task %s was stopped, sending a SIGCONT...\n", id);
+    kill(pid, SIGCONT);
+  }
+  free(tasks);
 }
 
 void send_reports() {
@@ -750,7 +780,11 @@ void remove_dead() {
       hash_drop(&threads, task_id);
       hash_drop(&controls, task_id);
 
-      // FIXME: Hadn't written child handler when this was implemented. Should look into this again afterwards.
+      // I'm unsure of this, but I think it makes sense. Just because the monitoring framework is getting shutdown doesn't
+      // mean that the process it's watching should be too.
+      // And if we're in shutdown, it'll get killed anyways.
+      // FIXME: Need to handle the possibility of user sending us a SIGTERM for the hell of it, leaving the child running,
+      // causing the keepalive logic to fail when we come back up.
       hash_drop(&children, task_id);
     }
   }

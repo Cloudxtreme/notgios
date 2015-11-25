@@ -96,7 +96,6 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
 
   // Figure out process running/not running situation.
   if (keepalive) {
-    write_log(LOG_DEBUG, "Task %s: Keeping alive...\n", id);
     FILE *file = fopen(pidfile, "w+");
     if (!file) {
       // We cannot write to the given pidfile path. Most likely the directory just
