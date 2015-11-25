@@ -57,14 +57,22 @@ void handle_signal(int signo);
 void handle_term();
 void handle_child();
 
-// Network Functions
-void send_reports();
+// High Level Network Functions
+void send_reports(int socket);
+int handle_process_report(task_report_t *report, char *start, char *buffer);
+int handle_directory_report(task_report_t *report, char *start, char *buffer);
+int handle_disk_report(task_report_t *report, char *start, char *buffer);
+int handle_swap_report(task_report_t *report, char *start, char *buffer);
+int handle_load_report(task_report_t *report, char *start, char *buffer);
+int handle_total_report(task_report_t *report, char *start, char *buffer);
+
+// Low Level Network Functions
+int create_server();
 int handshake(char *server_hostname, int port, int initial);
 int handle_read(int fd, char *buffer, int len);
 int handle_write(int fd, char *buffer);
 
 // Utility Functions
-int create_server();
 int parse_commands(char **output, char *input);
 thread_control_t *create_thread_control();
 void destroy_thread_control(void *voidarg);
@@ -260,7 +268,7 @@ int main(int argc, char **argv) {
         // is almost impossible to get right, and having two sockets requires significantly more error handling.
         // Either way, due to the keepalive, except in exceptional circumstances when we wouldn't be able to write
         // data anyways, this is gauranteed to be run at least once every 10 seconds.
-        send_reports();
+        send_reports(socket);
 
         // If any tasks encountered unrecoverable errors, a message has already been sent to the front end, so remove
         // the task from the tables.
@@ -284,6 +292,9 @@ int main(int argc, char **argv) {
       pthread_rwlock_unlock(&connection_lock);
     } else {
       write_log(LOG_INFO, "Monitor: Shutdown was initiated. Killing tasks...\n");
+
+      // FIXME: Need to handle the possibility of user sending us a SIGTERM for the hell of it, leaving the child running,
+      // causing the keepalive logic to fail when we come back up.
       char **tasks = hash_keys(&threads);
       for (char **current = tasks, *task_id = *current; current - tasks < threads.count; current++, task_id = *current) {
         pthread_t *thread = hash_get(&threads, task_id);
@@ -494,7 +505,7 @@ void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
   memset(id_str, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
   sscanf(cmd, "ID %s", id_str);
   control = hash_get(&controls, id_str);
-  
+
   // This shouldn't happen, but would mean the server sent us a request for a nonexistent ID.
   if (!control) RETURN_NACK(reply_buf, "NO_SUCH_ID");
 
@@ -572,28 +583,115 @@ void handle_child() {
     }
   }
 
+  // This shouldn't happen, and I don't know what to do if it did, but I'll put this here for debugging purposes.
   if (!id) {
     free(tasks);
     write_log(LOG_ERR, "Monitor: Was sent a SIGCHLD, but can't find it???\n");
     return;
   }
 
+  // Figure out what happened to the child and take appropriate action.
   if (WIFEXITED(status) || WIFSIGNALED(status)) {
     write_log(LOG_INFO, "Child for task %s either crashed, exited, or was killed. Marking for restart...\n", id);
     hash_drop(&children, id);
   } else if (WIFSTOPPED(status)) {
+    // TODO: User might not want this, so need to make it configurable.
     write_log(LOG_INFO, "Child for task %s was stopped, sending a SIGCONT...\n", id);
     kill(pid, SIGCONT);
   }
   free(tasks);
 }
 
-void send_reports() {
+void send_reports(int socket) {
   while (reports.count > 0) {
     task_report_t report;
+    int retval = NOTGIOS_SUCCESS;
+    char buffer[NOTGIOS_STATIC_BUFSIZE], *start = "NGS JOB REPORT";
     rpop(&reports, &report);
-    // TODO: Finish this function.
+
+    if (strlen(report.message) > 0) {
+      // Task is good.
+      switch (report.type) {
+        case PROCESS:
+          retval = handle_process_report(&report, start, buffer);
+          break;
+        case DIRECTORY:
+          retval = handle_directory_report(&report, start, buffer);
+          break;
+        case DISK:
+          retval = handle_disk_report(&report, start, buffer);
+          break;
+        case SWAP:
+          retval = handle_swap_report(&report, start, buffer);
+          break;
+        case LOAD:
+          retval = handle_load_report(&report, start, buffer);
+          break;
+        case TOTAL:
+          retval = handle_total_report(&report, start, buffer);
+          break;
+        default:
+          write_log(LOG_DEBUG, "Monitor: Found an invalid report while sending reports...\n");
+          retval = NOTGIOS_GENERIC_ERROR;
+      }
+    } else {
+      // Task encountered an error.
+      sprintf(buffer, "%s\n%s\n\n", start, report.message);
+    }
+
+    if (retval == NOTGIOS_SUCCESS) {
+      // Send the report to the server.
+      handle_write(socket, buffer);
+
+      // FIXME: Should add error handling here, but I'll need to wait until I start working on the server.
+      // Can't think of any reason the server should ever send back a NACK as of now.
+      handle_read(socket, buffer, NOTGIOS_STATIC_BUFSIZE);
+    }
   }
+}
+
+int handle_process_report(task_report_t *report, char *start, char *buffer) {
+  char specific_msg[NOTGIOS_SMALL_BUFSIZE];
+  
+  // Write our metric specific message.
+  switch (report->metric) {
+    case MEMORY:
+      sprintf(specific_msg, "BYTES %d", report->value);
+      break;
+    case CPU:
+      sprintf(specific_msg, "CPU PERCENT %.2f", report->percentage);
+      break;
+    case IO:
+      sprintf(specific_msg, "IO PERCENT %.2f", report->percentage);
+      break;
+    default:
+      write_log(LOG_DEBUG, "Monitor: Found an invalid process report while sending reports...\n");
+      return NOTGIOS_GENERIC_ERROR;
+  }
+
+  // Write the full message.
+  sprintf(buffer, "%s\n%s\n\n", start, specific_msg);
+  return NOTGIOS_SUCCESS;
+}
+
+int handle_directory_report(task_report_t *report, char *start, char *buffer) {
+  // TODO: Implement this function.
+}
+
+int handle_disk_report(task_report_t *report, char *start, char *buffer) {
+  // TODO: Implement this function.
+}
+
+int handle_swap_report(task_report_t *report, char *start, char *buffer) {
+  // TODO: Implement this function.
+}
+
+int handle_load_report(task_report_t *report, char *start, char *buffer) {
+  // TODO: Implement this function.
+}
+
+int handle_total_report(task_report_t *report, char *start, char *buffer) {
+  // TODO: Implement this function.
 }
 
 // Performs handshake with server. Two different types of handshakes are possible and denote
@@ -780,11 +878,9 @@ void remove_dead() {
       hash_drop(&threads, task_id);
       hash_drop(&controls, task_id);
 
-      // I'm unsure of this, but I think it makes sense. Just because the monitoring framework is getting shutdown doesn't
-      // mean that the process it's watching should be too.
-      // And if we're in shutdown, it'll get killed anyways.
-      // FIXME: Need to handle the possibility of user sending us a SIGTERM for the hell of it, leaving the child running,
-      // causing the keepalive logic to fail when we come back up.
+      // Currently tasks can only really fail if there's like a serious problem with the system setup (unsupported distro)
+      // or if there's an unrecoverable error that meant the task couldn't be recovered. Should never be any children
+      // running, but whatever.
       hash_drop(&children, task_id);
     }
   }

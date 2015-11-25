@@ -7,11 +7,13 @@
 
 /*----- Constant Declarations -----*/
 
+// Numerical Constants
 #define NOTGIOS_MONITOR_PORT 31089
 #define NOTGIOS_ACCEPT_TIMEOUT 60
 #define NOTGIOS_READ_TIMEOUT 20
 #define NOTGIOS_WRITE_TIMEOUT 4
 #define NOTGIOS_STATIC_BUFSIZE 512
+#define NOTGIOS_SMALL_BUFSIZE 32
 #define NOTGIOS_ERROR_BUFSIZE 64
 #define NOTGIOS_REQUIRED_COMMANDS 5
 #define NOTGIOS_MAX_OPTIONS 4
@@ -21,6 +23,8 @@
 #define NOTGIOS_MAX_NUM_LEN 12
 #define NOTGIOS_MAX_ARGS 32
 #define NOTGIOS_MAX_PROC_LEN 32
+
+// Return values
 #define NOTGIOS_SUCCESS 0x0
 #define NOTGIOS_GENERIC_ERROR -0x01
 #define NOTGIOS_BAD_HOSTNAME -0x02
@@ -44,6 +48,7 @@
 /*----- Type Declaractions -----*/
 
 typedef enum {
+  NO_TYPE,
   PROCESS,
   DIRECTORY,
   DISK,
@@ -56,7 +61,7 @@ typedef enum {
   NONE,
   MEMORY,
   CPU,
-  IO,
+  IO
 } metric_type_t;
 
 typedef enum {

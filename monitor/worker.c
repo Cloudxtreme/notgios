@@ -40,7 +40,7 @@ int total_io_collect(task_report_t *data);
 
 // Utility Functions
 int check_statm();
-void init_task_report(task_report_t *report, task_type_t type, metric_type_t metric);
+void init_task_report(task_report_t *report, char *id, task_type_t type, metric_type_t metric);
 
 /*----- Evil but Necessary Globals -----*/
 
@@ -73,7 +73,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
   uint16_t pid;
   char *pidfile, *runcmd;
   task_report_t report;
-  init_task_report(&report, PROCESS, metric);
+  init_task_report(&report, id, PROCESS, metric);
 
   // Pull out options.
   for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) {
@@ -295,13 +295,15 @@ int check_statm() {
   return !access("/proc/self/statm", F_OK);
 }
 
-void init_task_report(task_report_t *report, task_type_t type, metric_type_t metric) {
+void init_task_report(task_report_t *report, char *id, task_type_t type, metric_type_t metric) {
   if (report) {
     memset(report->id, 0, sizeof(char) * NOTGIOS_MAX_NUM_LEN);
     memset(report->message, 0, sizeof(char) * NOTGIOS_ERROR_BUFSIZE);
+
+    strcpy(report->id, id);
     report->percentage = 0;
     report->value = 0;
-    report->type = EMPTY;
-    report->metric = NONE;
+    report->type = type;
+    report->metric = metric;
   }
 }
