@@ -1,5 +1,5 @@
 CC					= gcc
-CFLAGS			= -g -pthread -Wall -Wextra -std=gnu99
+CFLAGS			= -g -pthread -Wall -Wextra -std=gnu99 -DDEBUG
 C_FILES			= $(wildcard monitor/*.c) $(wildcard include/*.c)
 OBJ_FILES		= $(filter-out obj/watchdog.o, $(addprefix obj/,$(notdir $(C_FILES:.c=.o))))
 VPATH 			= monitor:include

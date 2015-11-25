@@ -92,26 +92,32 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
         break;
     }
   }
+  write_log(LOG_DEBUG, "Task %s: Finished parsing arguments for task...\n", id);
 
   // Figure out process running/not running situation.
   if (keepalive) {
+    write_log(LOG_DEBUG, "Task %s: Keeping alive...\n", id);
     FILE *file = fopen(pidfile, "w+");
     if (!file) {
       // We cannot write to the given pidfile path. Most likely the directory just
       // doesn't exist, but I'm defining this as an unrecoverable error, so send a message
       // to the frontend and remove the task.
+      write_log(LOG_ERR, "Task %s: Pidfile inaccessible for keepalive process...\n", id);
       sprintf(report.message, "FATAL CAUSE NO_PIDFILE");
       lpush(&reports,  &report);
       return NOTGIOS_TASK_FATAL;
     }
+    write_log(LOG_DEBUG, "Task %s: Successfully opened pidfile for keepalive process...\n", id);
 
     int *tmp_pid = hash_get(&children, id);
     if (tmp_pid) {
+      write_log(LOG_DEBUG, "Task %s: Keepalive Process is already running...\n", id);
       pid = *tmp_pid;
       fprintf(file, "%u", pid);
     } else {
       pid = fork();
       if (pid) {
+        write_log(LOG_DEBUG, "Task %s: Forked...\n", id);
         uint16_t *pid_cpy = malloc(sizeof(uint16_t));
         *pid_cpy = pid;
         hash_put(&children, id, pid_cpy);
@@ -144,21 +150,25 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
       // We can access the file.
       int retval = fscanf(file, "%u", &other_pid);
       fclose(file);
+      write_log(LOG_DEBUG, "Task %s: Got pid for watched process...\n", id);
 
       if (retval && retval != EOF) {
         // We read the pid successfully.
         retval = kill(other_pid, 0);
         if (!retval) {
           // The process is running!
+          write_log(LOG_DEBUG, "Task %s: Watched process is still running...\n", id);
           pid = other_pid;
         } else {
           // The process is not currently running, enqueue a report saying this, then return.
+          write_log(LOG_ERR, "Task %s: Kill revealed watched process is not running...\n", id);
           sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
           lpush(&reports, &report);
           return NOTGIOS_SUCCESS;
         }
       } else {
         // The process is not currently running, enqueue a report saying this, then return.
+        write_log(LOG_ERR, "Task %s: Pidfile not formatted correctly for watched process...\n", id);
         sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
         lpush(&reports, &report);
         return NOTGIOS_SUCCESS;
@@ -166,6 +176,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
     } else {
       // We can't access the file. I'm defining this as an unrecoverable error, so
       // send a message to the frontend, and then remove the task.
+      write_log(LOG_ERR, "Task %s: Pidfile not accessible for watched process...\n", id);
       sprintf(report.message, "FATAL CAUSE NO_PIDFILE");
       lpush(&reports, &report);
       return NOTGIOS_TASK_FATAL;
@@ -183,14 +194,18 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
           // after implementing the child handler.
           // Since we're keeping alive, this most likely means that the user gave us an invalid command.
           // Send an error message, and the frontend will eventually kill the task if necessary.
+          write_log(LOG_ERR, "Task %s: Watched/Keepalive process is not running for collection...\n", id);
           sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
         } else {
           // We can't even read from /proc/self/statm, which should be guaranteed to work on any version of
           // linux that supports statm at all. Let the front end know that we're running on an unsupported
           // distro.
+          write_log(LOG_ERR, "Task %s: Running on unsupported distro...\n", id);
           sprintf(report.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
           return NOTGIOS_TASK_FATAL;
         } 
+      } else {
+        write_log(LOG_DEBUG, "Task %s: Memory info colleted...\n", id);
       }
       break;
     case CPU:
@@ -201,6 +216,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
   }
 
   // Enqueue metrics for sending.
+  write_log(LOG_DEBUG, "Task %s: Enqueuing report and returning...\n", id);
   lpush(&reports, &report);
   return NOTGIOS_SUCCESS;
 }

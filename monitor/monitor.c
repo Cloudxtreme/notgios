@@ -11,6 +11,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <syslog.h>
+#include <time.h>
 
 /*----- Local Includes -----*/
 
@@ -42,13 +43,6 @@
 // This is not supposed to be a generic max function, and has tons of pitfalls.
 // Really just meant to return the greatest of two, not being incremented, ints.
 #define SIMPLE_MAX(x, y) (((x) > (y)) ? (x) : (y))
-
-// Declare ourselves a logging function based on our environment.
-#ifdef DEBUG
-#define write_log(priority, ...) fprintf(stderr, __VA_ARGS__)
-#else
-#define write_log(priority, ...) syslog(priority, __VA_ARGS__)
-#endif
 
 /*----- Local Function Declarations -----*/
 
@@ -119,13 +113,13 @@ int main(int argc, char **argv) {
   retvals[2] = init_hash(&children, free);
   retvals[3] = init_list(&reports, sizeof(task_report_t), free);
   if (retvals[0] || retvals[1] || retvals[2] || retvals[3]) {
-    write_log(LOG_ERR, "Failed to initialize necessary tables and lists, exiting...\n");
+    write_log(LOG_ERR, "Monitor: Failed to initialize necessary tables and lists, exiting...\n");
     return EXIT_FAILURE;
   }
   pthread_rwlock_init(&connection_lock, NULL);
   int pipes[2];
   if (pipe(pipes)) {
-    write_log(LOG_ERR, "Failed to open termination pipe, exiting...\n");
+    write_log(LOG_ERR, "Monitor: Failed to open termination pipe, exiting...\n");
     return EXIT_FAILURE;
   }
   termpipe_out = pipes[0];
@@ -151,7 +145,7 @@ int main(int argc, char **argv) {
 
   // Check out return values.
   if (retvals[0] || retvals[1] || retvals[2] || retvals[3]) {
-    write_log(LOG_ERR, "Failed to install all signal handlers, exiting...\n");
+    write_log(LOG_ERR, "Monitor: Failed to install all signal handlers, exiting...\n");
     return EXIT_FAILURE;
   }
 
@@ -165,7 +159,7 @@ int main(int argc, char **argv) {
       case NOTGIOS_BAD_HOSTNAME:
         user_error();
       default:
-        write_log(LOG_ERR, "Initial handshake with server failed, exiting...\n");
+        write_log(LOG_ERR, "Monitor: Initial handshake with server failed, exiting...\n");
         return EXIT_FAILURE;
     }
     initial = 0;
@@ -173,10 +167,10 @@ int main(int argc, char **argv) {
     // The handshake was successful, configure the listening socket and wait on a connection.
     if ((server_socket = create_server()) == NOTGIOS_SOCKET_FAILURE) {
       user_error();
-      write_log(LOG_ERR, "Failed to open listening socket, exiting...\n");
+      write_log(LOG_ERR, "Monitor: Failed to open listening socket, exiting...\n");
       return EXIT_FAILURE;
     }
-    write_log(LOG_INFO, "Initial handshake completed, waiting for server to connect...\n");
+    write_log(LOG_INFO, "Monitor: Initial handshake completed, waiting for server to connect...\n");
     struct timeval time;
     time.tv_sec = NOTGIOS_ACCEPT_TIMEOUT;
     time.tv_usec = 0;
@@ -187,7 +181,7 @@ int main(int argc, char **argv) {
 
     // Select returned, so check if we've timed out.
     if (!FD_ISSET(server_socket, &to_read)) {
-      write_log(LOG_ERR, "Timed out while waiting for server to make contact, exiting...\n");
+      write_log(LOG_ERR, "Monitor: Timed out while waiting for server to make contact, exiting...\n");
       return EXIT_FAILURE;
     }
 
@@ -200,14 +194,14 @@ int main(int argc, char **argv) {
     int socket = accept(server_socket, (struct sockaddr *) &client_addr, &client_len);
     if (socket < 0) {
       if (errno == EWOULDBLOCK || errno == EAGAIN) {
-        write_log(LOG_ERR, "Server closed connection while it was being opened. Exiting to start clean...\n");
+        write_log(LOG_ERR, "Monitor: Server closed connection while it was being opened. Exiting to start clean...\n");
       } else {
-        write_log(LOG_ERR, "An unknown error occured while attempting to accept connection from server, exiting...\n");
+        write_log(LOG_ERR, "Monitor: An unknown error occured while attempting to accept connection from server, exiting...\n");
       }
       return EXIT_FAILURE;
     }
     fcntl(socket, F_SETFL, O_NONBLOCK);
-    write_log(LOG_INFO, "Connected to server...\n");
+    write_log(LOG_INFO, "Monitor: Connected to server...\n");
 
     // Mark the global connected flag to make sure workers send their findings.
     pthread_rwlock_wrlock(&connection_lock);
@@ -223,30 +217,30 @@ int main(int argc, char **argv) {
         if (!parse_commands(commands, buffer)) {
           char *cmd = commands[0];
           if (strstr(cmd, "NGS JOB ADD") == cmd) {
-            write_log(LOG_INFO, "Received an add message...\n");
+            write_log(LOG_INFO, "Monitor: Received an add message...\n");
             handle_add(commands, buffer);
           } else if (strstr(cmd, "NGS JOB PAUS") == cmd) {
-            write_log(LOG_INFO, "Received a pause message...\n");
+            write_log(LOG_INFO, "Monitor: Received a pause message...\n");
             handle_reschedule(commands[1], buffer, PAUSE);
           } else if (strstr(cmd, "NGS JOB RES") == cmd) {
-            write_log(LOG_INFO, "Received a resume message...\n");
+            write_log(LOG_INFO, "Monitor: Received a resume message...\n");
             handle_reschedule(commands[1], buffer, RESUME);
           } else if (strstr(cmd, "NGS JOB DEL") == cmd) {
-            write_log(LOG_INFO, "Received a delete message...\n");
+            write_log(LOG_INFO, "Monitor: Received a delete message...\n");
             handle_reschedule(commands[1], buffer, DELETE);
           } else if (strstr(cmd, "NGS STILL THERE?") == cmd) {
             // Manual keepalive. I know TCP is supposed to do stuff like this on its own, but honestly it makes
             // it easier on my end to detect errors if I also do it manually.
-            write_log(LOG_INFO, "Received keepalive message...\n");
+            write_log(LOG_INFO, "Monitor: Received keepalive message...\n");
             sprintf(buffer, "NGS STILL HERE!\n\n");
           } else if (strstr(cmd, "NGS BYE") == cmd) {
-            write_log(LOG_INFO, "Server send a shutdown message, beginning reconnect procedures...\n");
+            write_log(LOG_INFO, "Monitor: Server send a shutdown message, beginning reconnect procedures...\n");
             break;
           } else if (exiting) {
             sprintf(buffer, "NGS NACK\nCAUSE SHUTDOWN\n\n");
           } else {
             // Shouldn't happen, but hey, everything that isn't supposed to happen eventually does, so there.
-            write_log(LOG_ERR, "Received an invalid message, discarding...\n");
+            write_log(LOG_ERR, "Monitor: Received an invalid message, discarding...\n");
             sprintf(buffer, "NGS NACK\nCAUSE UNRECOGNIZED_COMMAND\n\n");
           }
         } else {
@@ -271,7 +265,7 @@ int main(int argc, char **argv) {
         // the task from the tables.
         remove_dead();
       } else {
-        write_log(LOG_ERR, "Error reading from socket...\n");
+        write_log(LOG_ERR, "Monitor: Error reading from socket...\n");
         break;
       }
     }
@@ -288,7 +282,7 @@ int main(int argc, char **argv) {
       connected = 0;
       pthread_rwlock_unlock(&connection_lock);
     } else {
-      write_log(LOG_INFO, "Shutdown was initiated. Killing tasks...\n");
+      write_log(LOG_INFO, "Monitor: Shutdown was initiated. Killing tasks...\n");
       char **tasks = hash_keys(&threads);
       for (char **current = tasks, *task_id = *current; current - tasks < threads.count; current++, task_id = *current) {
         pthread_t *thread = hash_get(&threads, task_id);
@@ -303,9 +297,9 @@ int main(int argc, char **argv) {
 
         // Join with task thread.
         pthread_join(*thread, NULL);
-        write_log(LOG_INFO, "Killed a task...\n");
+        write_log(LOG_INFO, "Monitor: Killed a task...\n");
       }
-      write_log(LOG_INFO, "Tasks have exited, proceeding to shutdown...\n");
+      write_log(LOG_INFO, "Monitor: Tasks have exited, proceeding to shutdown...\n");
       free(tasks);
       destroy_hash(&threads);
       destroy_hash(&controls);
@@ -321,6 +315,7 @@ int main(int argc, char **argv) {
 void *launch_worker_thread(void *voidargs) {
   // Parse out all of the relevant arguments.
   thread_args_t *args = voidargs;
+  struct timespec time;
   char *id = args->id;
   int freq = args->freq;
   task_type_t type = args->type;
@@ -328,12 +323,8 @@ void *launch_worker_thread(void *voidargs) {
   thread_control_t *control = args->control;
   task_option_t *options = args->options;
 
-  // Setup our sleep timer.
-  struct timespec time;
-  time.tv_sec = freq;
-
   // Spin and collect data until we're killed.
-  write_log(LOG_INFO, "Task #%s successfully launched!\n", id);
+  write_log(LOG_INFO, "Task %s: Successfully launched!\n", id);
   pthread_mutex_lock(&control->mutex);
   while (!control->killed) {
     // Check if we've been paused, and sleep until we're rescheduled if so.
@@ -345,12 +336,17 @@ void *launch_worker_thread(void *voidargs) {
     // If we encountered a fatal error, message to front end has already been queued, so
     // remove the task.
     if (retval == NOTGIOS_TASK_FATAL) {
-      write_log(LOG_ERR, "Task #%s encountered a fatal error, exiting...\n", id);
+      write_log(LOG_ERR, "Task %s: Encountered a fatal error, exiting...\n", id);
       control->dropped = 1;
       pthread_mutex_unlock(&control->mutex);
       return NULL;
     }
-    write_log(LOG_INFO, "Task #%s finished collecting data...\n", id);
+    write_log(LOG_INFO, "Task %s: Finished collecting data...\n", id);
+
+    // pthread_cond_timewait takes an absolute time to sleep until. Seems kind of silly to me,
+    // but we have to deal with it.
+    clock_gettime(CLOCK_REALTIME, &time);
+    time.tv_sec += freq;
 
     // Sleep until either it's time to collect data again or we've been rescheduled.
     pthread_cond_timedwait(&control->signal, &control->mutex, &time);
@@ -461,7 +457,7 @@ void handle_add(char **commands, char *reply_buf) {
       }
     }
   }
-  write_log(LOG_INFO, "Finished parsing options. Starting the task...\n");
+  write_log(LOG_DEBUG, "Monitor: Finished parsing options. Starting the task...\n");
 
   // Create a control struct for the thread.
   thread_control_t *control = create_thread_control();
@@ -527,7 +523,7 @@ void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
   }
 
   // Write acknowledgement.
-  write_log(LOG_INFO, "Task successfully rescheduled...\n");
+  write_log(LOG_INFO, "Monitor: Task successfully rescheduled...\n");
   RETURN_ACK(reply_buf);
 }
 
@@ -590,9 +586,9 @@ int handshake(char *server_hostname, int port, int initial) {
   serv_addr.sin_family = AF_INET;
   memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
   serv_addr.sin_port = htons(port);
-  write_log(LOG_INFO, "Attempting to connect to server...\n");
+  write_log(LOG_DEBUG, "Monitor: Attempting to connect to server...\n");
   while (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-    write_log(LOG_ERR, "Connect failed, sleeping for %d seconds...\n", sleep_period);
+    write_log(LOG_ERR, "Monitor: Connect failed, sleeping for %d seconds...\n", sleep_period);
     sleep(sleep_period);
     if (sleep_period < 32) sleep_period *= 2;
     if (sleep_period == 32 && initial) return NOTGIOS_SERVER_UNREACHABLE;
@@ -641,10 +637,10 @@ int handle_read(int fd, char *buffer, int len) {
     if (FD_ISSET(fd, &to_read)) {
       // We've received data from the server, time to read it.
       int retval = read(fd, buffer, len);
-      if (retval >= 0) {
+      if (retval > 0) {
         e_count = 0;
         actual += retval;
-      } else if (e_count++ > 5) {
+      } else if (retval == 0 || e_count++ > 5) {
         return NOTGIOS_SOCKET_CLOSED;
       }
     } else if (FD_ISSET(termpipe_out, &to_read)) {
@@ -749,7 +745,7 @@ void remove_dead() {
     // running, and if we happen to read dropped while it's being set, it'll be cleaned up next round.
     // Futhermore, we're the only thread that removes tasks.
     if (control->dropped) {
-      write_log(LOG_INFO, "Removing a dead task...\n");
+      write_log(LOG_INFO, "Monitor: Removing a dead task...\n");
       pthread_join(*thread, NULL);
       hash_drop(&threads, task_id);
       hash_drop(&controls, task_id);

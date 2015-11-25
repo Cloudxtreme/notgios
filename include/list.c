@@ -29,6 +29,7 @@ int setup_list(list_t *lst, int elem_len, void (*destruct) (void *)) {
     lst->count = 0;
     lst->frozen = 0;
     lst->elem_len = elem_len;
+    lst->destruct = destruct;
     return 1;
   }
   return 0;

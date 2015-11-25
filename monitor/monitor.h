@@ -31,6 +31,16 @@
 #define NOTGIOS_TOO_MANY_ARGS -0x40
 #define NOTGIOS_EXEC_FAILED -0x80
 
+/*----- Macro Declarations -----*/
+
+// Declare ourselves a logging function based on our environment.
+#ifdef DEBUG
+#define write_log(priority, ...) fprintf(stderr, __VA_ARGS__)
+#else
+#define write_log(priority, ...) syslog(priority, __VA_ARGS__)
+#endif
+
+
 /*----- Type Declaractions -----*/
 
 typedef enum {
