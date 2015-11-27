@@ -791,7 +791,7 @@ int handle_read(int fd, char *buffer, int len) {
 // unexpected shutdown. In an attempt to disambiguate this, function blocks for a maximum of
 // NOTGIOS_WRITE_TIMEOUT, before either writing the data or returning NOTGIOS_SOCKET_CLOSED.
 int handle_write(int fd, char *buffer) {
-  int actual = 0, expected = strlen(buffer) + 1;
+  int actual = 0, expected = strlen(buffer);
   while (actual != expected) {
     int retval = write(fd, buffer, expected - actual);
     if (retval >= 0) {
