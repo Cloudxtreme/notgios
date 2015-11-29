@@ -20,7 +20,10 @@ class TCPSocket
   def get_message(timeout = 20)
     if IO.select([self], nil, nil, timeout)
       message, tmp = String.new, gets
-      message += tmp and tmp = gets until tmp == "\n"
+      until tmp == "\n"
+        message += tmp
+        tmp = gets
+      end
       message.split("\n")
     else
       Array.new
@@ -95,6 +98,6 @@ Thread.new do
 end
 
 loop do
-  elem = incoming.unshift
+  elem = incoming.shift
   puts elem if elem.exists?
 end
