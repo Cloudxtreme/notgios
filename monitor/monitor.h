@@ -34,6 +34,7 @@
 #define NOTGIOS_SOCKET_CLOSED -0x20
 #define NOTGIOS_TOO_MANY_ARGS -0x40
 #define NOTGIOS_EXEC_FAILED -0x80
+#define NOTGIOS_UNSUPP_DISTRO -0x100
 
 /*----- Macro Declarations -----*/
 

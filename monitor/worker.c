@@ -9,6 +9,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <pthread.h>
+#include <netinet/in.h>
 
 /*----- Local Includes -----*/
 
@@ -108,11 +109,11 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
     }
     write_log(LOG_DEBUG, "Task %s: Successfully opened pidfile for keepalive process...\n", id);
 
-    int *tmp_pid = hash_get(&children, id);
+    uint16_t *tmp_pid = hash_get(&children, id);
     if (tmp_pid) {
       write_log(LOG_DEBUG, "Task %s: Keepalive Process is already running...\n", id);
       pid = *tmp_pid;
-      fprintf(file, "%u", pid);
+      fprintf(file, "%hu", pid);
     } else {
       pid = fork();
       if (pid) {
@@ -120,7 +121,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
         uint16_t *pid_cpy = malloc(sizeof(uint16_t));
         *pid_cpy = pid;
         hash_put(&children, id, pid_cpy);
-        fprintf(file, "%u", pid);
+        fprintf(file, "%hu", pid);
       } else {
         int elem = 0;
         char *args[NOTGIOS_MAX_ARGS];
@@ -147,7 +148,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
     FILE *file = fopen(pidfile, "r");
     if (file) {
       // We can access the file.
-      int retval = fscanf(file, "%u", &other_pid);
+      int retval = fscanf(file, "%hu", &other_pid);
       fclose(file);
       write_log(LOG_DEBUG, "Task %s: Got pid for watched process...\n", id);
 
@@ -216,6 +217,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
 
   // Enqueue metrics for sending.
   write_log(LOG_DEBUG, "Task %s: Enqueuing report and returning...\n", id);
+
   lpush(&reports, &report);
   return NOTGIOS_SUCCESS;
 }

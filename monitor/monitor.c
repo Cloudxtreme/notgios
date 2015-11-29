@@ -609,7 +609,7 @@ void send_reports(int socket) {
     char buffer[NOTGIOS_STATIC_BUFSIZE], *start = "NGS JOB REPORT";
     rpop(&reports, &report);
 
-    if (strlen(report.message) > 0) {
+    if (strlen(report.message) == 0) {
       // Task is good.
       switch (report.type) {
         case PROCESS:
@@ -636,16 +636,14 @@ void send_reports(int socket) {
       }
     } else {
       // Task encountered an error.
-      sprintf(buffer, "%s\n%s\n\n", start, report.message);
+      sprintf(buffer, "%s\nID %s\n%s\n\n", start, report.id, report.message);
     }
 
     if (retval == NOTGIOS_SUCCESS) {
       // Send the report to the server.
+      // FIXME: Currently does not expect an ACK after sending reports. Simplifies logic as this
+      // could otherwise potentially swallow keepalive messages or other things.
       handle_write(socket, buffer);
-
-      // FIXME: Should add error handling here, but I'll need to wait until I start working on the server.
-      // Can't think of any reason the server should ever send back a NACK as of now.
-      handle_read(socket, buffer, NOTGIOS_STATIC_BUFSIZE);
     }
   }
 }
@@ -656,7 +654,7 @@ int handle_process_report(task_report_t *report, char *start, char *buffer) {
   // Write our metric specific message.
   switch (report->metric) {
     case MEMORY:
-      sprintf(specific_msg, "BYTES %d", report->value);
+      sprintf(specific_msg, "BYTES %d", (int) report->value);
       break;
     case CPU:
       sprintf(specific_msg, "CPU PERCENT %.2f", report->percentage);
@@ -670,7 +668,7 @@ int handle_process_report(task_report_t *report, char *start, char *buffer) {
   }
 
   // Write the full message.
-  sprintf(buffer, "%s\n%s\n\n", start, specific_msg);
+  sprintf(buffer, "%s\nID %s\n%s\n\n", start, report->id, specific_msg);
   return NOTGIOS_SUCCESS;
 }
 
