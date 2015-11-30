@@ -77,14 +77,17 @@ int parse_commands(char **output, char *input);
 thread_control_t *create_thread_control();
 void destroy_thread_control(void *voidarg);
 void remove_dead();
+void increment_stats(task_type_t type, char *id);
+void decrement_stats(task_type_t type, char *id);
 void user_error();
 
 /*----- Evil but Necessary Globals -----*/
 
 hash_t threads, controls, children;
 list_t reports;
-pthread_rwlock_t connection_lock;
-int connected = 0, termpipe_in, termpipe_out, exiting = 0;
+monitor_stats_t task_stats;
+pthread_rwlock_t stats_lock;
+int termpipe_in, termpipe_out, exiting = 0;
 
 /*----- Function Implementations -----*/
 
@@ -125,7 +128,6 @@ int main(int argc, char **argv) {
     write_log(LOG_ERR, "Monitor: Failed to initialize necessary tables and lists, exiting...\n");
     return EXIT_FAILURE;
   }
-  pthread_rwlock_init(&connection_lock, NULL);
   int pipes[2];
   if (pipe(pipes)) {
     write_log(LOG_ERR, "Monitor: Failed to open termination pipe, exiting...\n");
@@ -133,6 +135,8 @@ int main(int argc, char **argv) {
   }
   termpipe_out = pipes[0];
   termpipe_in = pipes[1];
+  pthread_rwlock_init(&stats_lock, NULL);
+  memset(&task_stats, 0, sizeof(monitor_stats_t));
 
   // Setup signal handlers.
   struct sigaction sa;
@@ -212,11 +216,6 @@ int main(int argc, char **argv) {
     fcntl(socket, F_SETFL, O_NONBLOCK);
     write_log(LOG_INFO, "Monitor: Connected to server...\n");
 
-    // Mark the global connected flag to make sure workers send their findings.
-    pthread_rwlock_wrlock(&connection_lock);
-    connected = 1;
-    pthread_rwlock_unlock(&connection_lock);
-
     // We're connected. Start reading jobs and stuff from the server.
     while (!exiting) {
       int retval = handle_read(socket, buffer, NOTGIOS_STATIC_BUFSIZE);
@@ -285,12 +284,7 @@ int main(int argc, char **argv) {
     // If the socket closed or the serve shutdown, we need to start buffering output and attempting to
     // reopen the connection with the server.
     // If we received a SIGTERM, we need to stop all tasks and shutdown.
-    if (!exiting) {
-      // FIXME: I need to read up on socket behavior.
-      pthread_rwlock_wrlock(&connection_lock);
-      connected = 0;
-      pthread_rwlock_unlock(&connection_lock);
-    } else {
+    if (exiting) {
       write_log(LOG_INFO, "Monitor: Shutdown was initiated. Killing tasks...\n");
 
       // FIXME: Need to handle the possibility of user sending us a SIGTERM for the hell of it, leaving the child running,
@@ -315,6 +309,7 @@ int main(int argc, char **argv) {
       free(tasks);
       destroy_hash(&threads);
       destroy_hash(&controls);
+      destroy_hash(&children);
       handle_write(socket, "NGS BYE\n\n");
     }
 
@@ -335,6 +330,9 @@ void *launch_worker_thread(void *voidargs) {
   thread_control_t *control = args->control;
   task_option_t *options = args->options;
 
+  // Update stats to reflect task creation.
+  increment_stats(type, id);
+
   // Spin and collect data until we're killed.
   write_log(LOG_INFO, "Task %s: Successfully launched!\n", id);
   pthread_mutex_lock(&control->mutex);
@@ -352,6 +350,9 @@ void *launch_worker_thread(void *voidargs) {
       write_log(LOG_ERR, "Task %s: Encountered a fatal error, exiting...\n", id);
       control->dropped = 1;
       pthread_mutex_unlock(&control->mutex);
+
+      // Update stats to reflect task removal.
+      decrement_stats(type, id);
       return NULL;
     } else if (retval == NOTGIOS_GENERIC_ERROR) {
       // This shouldn't happen, but would indicate that an incorrectly initialized task slipped
@@ -359,6 +360,9 @@ void *launch_worker_thread(void *voidargs) {
       write_log(LOG_ERR, "Task %s: Initialization of task appears invalid, exiting...\n", id);
       control->dropped = 1;
       pthread_mutex_unlock(&control->mutex);
+
+      // Update stats to reflect task removal.
+      decrement_stats(type, id);
       return NULL;
     }
     write_log(LOG_INFO, "Task %s: Finished collecting data...\n", id);
@@ -374,6 +378,9 @@ void *launch_worker_thread(void *voidargs) {
     pthread_cond_timedwait(&control->signal, &control->mutex, &time);
   }
   pthread_mutex_unlock(&control->mutex);
+
+  // Update stats to reflect task removal.
+  decrement_stats(type, id);
 
   return NULL;
 }
@@ -558,6 +565,7 @@ void handle_term() {
   // We're shutting down, so freeze the hashes so they can't be modified.
   hash_freeze(&threads);
   hash_freeze(&controls);
+  hash_freeze(&children);
 
   // Set the exiting flag.
   exiting = 1;
@@ -577,8 +585,7 @@ void handle_term() {
 }
 
 // Function handles removing dead children from the children hash so that they'll be restarted.
-// TODO: This is a critical function, and I'm not convinced that this behavior alone is enough.
-// Revisit at some point.
+// TODO: Need to check exit status of child here to see if the exec failed.
 void handle_child() {
   int status = 0;
   pid_t pid = waitpid((pid_t) -1, &status, WUNTRACED | WCONTINUED);
@@ -660,7 +667,7 @@ void send_reports(int socket) {
 
 int handle_process_report(task_report_t *report, char *start, char *buffer) {
   char specific_msg[NOTGIOS_SMALL_BUFSIZE];
-  
+
   // Write our metric specific message.
   switch (report->metric) {
     case MEMORY:
@@ -893,6 +900,62 @@ void remove_dead() {
     }
   }
   free(tasks);
+}
+
+void increment_stats(task_type_t type, char *id) {
+  pthread_rwlock_wrlock(&stats_lock);
+  task_stats.num_tasks++;
+  switch (type) {
+    case PROCESS:
+      task_stats.num_process_tasks++;
+      break;
+    case DIRECTORY:
+      task_stats.num_dir_tasks++;
+      break;
+    case DISK:
+      task_stats.num_disk_tasks++;
+      break;
+    case SWAP:
+      task_stats.num_swap_tasks++;
+      break;
+    case LOAD:
+      task_stats.num_load_tasks++;
+      break;
+    case TOTAL:
+      task_stats.num_total_tasks++;
+      break;
+    default:
+      write_log(LOG_DEBUG, "Task %s: Invalid task encountered during stat update...\n", id);
+  }
+  pthread_rwlock_unlock(&stats_lock);
+}
+
+void decrement_stats(task_type_t type, char *id) {
+  pthread_rwlock_wrlock(&stats_lock);
+  task_stats.num_tasks--;
+  switch (type) {
+    case PROCESS:
+      task_stats.num_process_tasks--;
+      break;
+    case DIRECTORY:
+      task_stats.num_dir_tasks--;
+      break;
+    case DISK:
+      task_stats.num_disk_tasks--;
+      break;
+    case SWAP:
+      task_stats.num_swap_tasks--;
+      break;
+    case LOAD:
+      task_stats.num_load_tasks--;
+      break;
+    case TOTAL:
+      task_stats.num_total_tasks--;
+      break;
+    default:
+      write_log(LOG_DEBUG, "Task %s: Invalid task encountered during stat update...\n", id);
+  }
+  pthread_rwlock_unlock(&stats_lock);
 }
 
 void user_error() {

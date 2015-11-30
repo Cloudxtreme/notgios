@@ -36,6 +36,9 @@
 #define NOTGIOS_EXEC_FAILED -0x80
 #define NOTGIOS_UNSUPP_DISTRO -0x100
 #define NOTGIOS_UNSUPP_TASK -0x200
+#define NOTGIOS_IN_SHUTDOWN -0x400
+#define NOTGIOS_BAD_ACCESS -0x800
+#define NOTGIOS_NO_FILES -0x1000
 
 /*----- Macro Declarations -----*/
 
@@ -100,5 +103,10 @@ typedef struct thread_args {
   thread_control_t *control;
   task_option_t options[NOTGIOS_MAX_OPTIONS];
 } thread_args_t;
+
+typedef struct monitor_stats {
+  int num_tasks, num_process_tasks, num_dir_tasks, num_disk_tasks, num_swap_tasks;
+  int num_load_tasks, num_total_tasks;
+} monitor_stats_t;
 
 #endif

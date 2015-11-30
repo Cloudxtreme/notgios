@@ -11,6 +11,9 @@
 #include <pthread.h>
 #include <netinet/in.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <sys/resource.h>
+#include <dirent.h>
 
 /*----- Local Includes -----*/
 
@@ -42,8 +45,9 @@ int handle_total(char *id, metric_type_t metric);
 int process_memory_collect(uint16_t pid, task_report_t *data);
 int process_cpu_collect(uint16_t pid, task_report_t *data);
 int process_io_collect(uint16_t pid, task_report_t *data);
-int directory_memory_collect(uint16_t pid, task_report_t *data);
+long directory_memory_collect(char *path);
 int disk_memory_collect(uint16_t pid, task_report_t *data);
+int disk_io_collect(uint16_t pid, task_report_t *data);
 int swap_collect(uint16_t pid, task_report_t *data);
 int load_collect(uint16_t pid, task_report_t *data);
 int total_memory_collect(task_report_t *data);
@@ -59,8 +63,8 @@ void init_task_report(task_report_t *report, char *id, task_type_t type, metric_
 
 extern hash_t threads, controls, children;
 extern list_t reports;
-extern pthread_rwlock_t connection_lock;
-extern int connected, exiting;
+extern monitor_stats_t task_stats;
+extern pthread_rwlock_t stats_lock;
 
 /*----- Function Implementations -----*/
 
@@ -98,6 +102,8 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
   init_task_report(&report, id, PROCESS, metric);
 
   // Pull out options.
+  // FIXME: Need to go over this again to make sure all necessary validation of parameters
+  // is performed.
   for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) {
     task_option_t *option = &options[i];
     switch (option->type) {
@@ -111,7 +117,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
         runcmd = option->value;
         break;
       case EMPTY:
-        // User chose not to specify and option. This is fine, move on.
+        // User chose not to specify an option. This is fine, move on.
         break;
       default:
         // We've been passed a task containing invalid options. Shouldn't happen, but handle
@@ -121,7 +127,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
         return NOTGIOS_GENERIC_ERROR;
     }
   }
-  write_log(LOG_DEBUG, "Task %s: Finished parsing arguments for task...\n", id);
+  write_log(LOG_DEBUG, "Task %s: Finished parsing arguments for process task...\n", id);
 
   // Figure out process running/not running situation.
   if (keepalive) {
@@ -148,8 +154,12 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
         write_log(LOG_DEBUG, "Task %s: Forked...\n", id);
         uint16_t *pid_cpy = malloc(sizeof(uint16_t));
         *pid_cpy = pid;
-        hash_put(&children, id, pid_cpy);
+
+        // Put the new pid into the children hash, update the pidfile, and just make
+        // sure we aren't doing all of this for nothing.
+        int retval = hash_put(&children, id, pid_cpy);
         fprintf(file, "%hu", pid);
+        if (retval == HASH_FROZEN) return NOTGIOS_IN_SHUTDOWN;
       } else {
         int elem = 0;
         char *args[NOTGIOS_MAX_ARGS];
@@ -274,13 +284,73 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
 
   // Enqueue metrics for sending.
   write_log(LOG_DEBUG, "Task %s: Enqueuing report and returning...\n", id);
-
   lpush(&reports, &report);
   return NOTGIOS_SUCCESS;
 }
 
 int handle_directory(task_option_t *options, char *id) {
-  // TODO: Write this function.
+  char *path = NULL;
+  task_report_t report;
+  init_task_report(&report, id, DIRECTORY, MEMORY);
+
+  // Pull out options
+  for (int i = 0; i < NOTGIOS_MAX_OPTIONS; i++) {
+    task_option_t *option = &options[i];
+    switch (option->type) {
+      case PATH:
+        path = option->value;
+        break;
+      case EMPTY:
+        // There's only one option for directory tasks, so this will be the most common branch.
+        break;
+      default:
+        // We've been passed a task containing invalid options. Shouldn't happen, but handle
+        // it for debugging.
+        sprintf(report.message, "FATAL CAUSE INVALID_TASK");
+        lpush(&reports, &report);
+        return NOTGIOS_GENERIC_ERROR;
+    }
+  }
+  write_log(LOG_DEBUG, "Task %s: Finished parsing arguments for directory task...\n", id);
+
+  // Perform some error handling on the given path.
+  if (!path) {
+    // The server should take care of making sure this doesn't happen, but the directory option
+    // wasn't sent.
+    write_log(LOG_ERR, "Task %s: Recevied directory task with no path option...\n", id);
+    sprintf(report.message, "FATAL CAUSE TASK_MISSING_OPTIONS");
+    lpush(&reports, &report);
+    return NOTGIOS_TASK_FATAL;
+  } else if (access(path, F_OK)) {
+    // We can't access the directory for some reason.
+    write_log(LOG_ERR, "Task %s: Cannot access directory...\n", id);
+    if (errno == EACCES || errno == ENOENT) sprintf(report.message, "FATAL CAUSE DIR_NOT_ACCESSIBLE");
+    else if (errno == ELOOP) sprintf(report.message, "FATAL CAUSE DIR_INFINITE_LOOP");
+    else if (errno == ENAMETOOLONG) sprintf(report.message, "FATAL CAUSE DIR_NAME_TOO_LONG");
+    else sprintf(report.message, "FATAL CAUSE UNKNOWN");
+    lpush(&reports, &report);
+    return NOTGIOS_TASK_FATAL;
+  }
+
+  // Recursively calculate the directory size.
+  write_log(LOG_DEBUG, "Task %s: Calculating directory size...\n", id);
+  long retval = directory_memory_collect(path);
+  if (retval >= 0) {
+    report.value = (double) retval;
+  } else if (retval == NOTGIOS_BAD_ACCESS) {
+    write_log(LOG_ERR, "Task %s: Access was refused for a subdirectory...\n", id);
+    sprintf(report.message, "FATAL CAUSE SUBDIR_NOT_ACCESSIBLE");
+    lpush(&reports, &report);
+    return NOTGIOS_TASK_FATAL;
+  } else if (retval == NOTGIOS_NO_FILES) {
+    write_log(LOG_ERR, "Task %s: Failed to open a file due to too many files being open...\n", id);
+    sprintf(report.message, "ERROR CAUSE TOO_MANY_FILES");
+  }
+
+  // Enqueue metrics for sending.
+  write_log(LOG_DEBUG, "Task %s: Enqueuing report and returning...\n", id);
+  lpush(&reports, &report);
+  return NOTGIOS_SUCCESS;
 }
 
 int handle_disk(metric_type_t metric, task_option_t *options, char *id) {
@@ -412,12 +482,66 @@ int process_io_collect(uint16_t pid, task_report_t *data) {
   return NOTGIOS_UNSUPP_TASK;
 }
 
-int directory_memory_collect(uint16_t pid, task_report_t *data) {
-  // TODO: Write this function.
+long directory_memory_collect(char *path) {
+  struct stat path_stat;
+  stat(path, &path_stat);
+
+  if (S_ISDIR(path_stat.st_mode)) {
+    // We're working with a directory. Time to recursively calculate its size.
+    DIR *directory = opendir(path);
+    if (directory) {
+      long size = 0;
+
+      // Iterate across all entries in the directory.
+      for (struct dirent *entry = readdir(directory); entry; entry = readdir(directory)) {
+        // Skip the parent and current directory.
+        if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+          // Recursively calculate size of entry.
+          char *filename = malloc(sizeof(char) * (strlen(path) + strlen(entry->d_name) + 2));
+          sprintf(filename, "%s/%s", path, entry->d_name);
+          long retval = directory_memory_collect(filename);
+          free(filename);
+
+          // Increment size and keep going.
+          if (retval >= 0) size += retval;
+          else return retval;
+        }
+      }
+      closedir(directory);
+
+      // We're done, return the size of the directory.
+      return size;
+    } else {
+      if (errno == EACCES) {
+        return NOTGIOS_BAD_ACCESS;
+      } else if (errno == EMFILE) {
+        struct rlimit fd_limits;
+        getrlimit(RLIMIT_NOFILE, &fd_limits);
+        fd_limits.rlim_max *= 2;
+        fd_limits.rlim_cur = fd_limits.rlim_max;
+        int retval = setrlimit(RLIMIT_NOFILE, &fd_limits);
+        if (!retval) return directory_memory_collect(path);
+        else return NOTGIOS_NO_FILES;
+      } else if (errno == ENFILE) {
+        return NOTGIOS_NO_FILES;
+      }
+    }
+  } else if (S_ISREG(path_stat.st_mode)) {
+    // We're working with a file. Return the size.
+    return (long) path_stat.st_size;
+  }
 }
 
 int disk_memory_collect(uint16_t pid, task_report_t *data) {
   // TODO: Write this function.
+}
+
+// This function, will, someday attempt to discern a way to get per disk IO statistics.
+// For now it's unimplemented.
+// TODO: Write this function.
+int disk_io_collect(uint16_t pid, task_report_t *data) {
+  // I'll write this function someday when I have time.
+  return NOTGIOS_UNSUPP_TASK;
 }
 
 int swap_collect(uint16_t pid, task_report_t *data) {
