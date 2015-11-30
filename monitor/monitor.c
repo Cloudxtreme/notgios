@@ -365,6 +365,8 @@ void *launch_worker_thread(void *voidargs) {
 
     // pthread_cond_timewait takes an absolute time to sleep until. Seems kind of silly to me,
     // but we have to deal with it.
+    // FIXME: Apparently this function was added to POSIX recently enough to not be portable.
+    // Need to replace with clock function. Fails to compile on CentOS 6.6.
     clock_gettime(CLOCK_REALTIME, &time);
     time.tv_sec += freq;
 

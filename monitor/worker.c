@@ -18,6 +18,16 @@
 #include "../include/hash.h"
 #include "../include/list.h"
 
+/*----- Macro Declarations -----*/
+
+#define RETURN_UNSUPPORTED_DISTRO(report, id)                                 \
+  do {                                                                        \
+    write_log(LOG_ERR, "Task %s: Running on an unsupported distro...\n", id); \
+    sprintf(report.message, "FATAL CAUSE UNSUPPORTED_DISTRO");                \
+    lpush(&reports, &report);                                                 \
+    return NOTGIOS_TASK_FATAL;                                                \
+  } while (0);
+
 /*----- Local Function Declaractions -----*/
 
 // Collection Type Handlers
@@ -42,6 +52,7 @@ int total_io_collect(task_report_t *data);
 
 // Utility Functions
 int check_statm();
+int check_stat();
 void init_task_report(task_report_t *report, char *id, task_type_t type, metric_type_t metric);
 
 /*----- Evil but Necessary Globals -----*/
@@ -217,9 +228,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
           // We can't even read from /proc/self/statm, which should be guaranteed to work on any version of
           // linux that supports statm at all. Let the front end know that we're running on an unsupported
           // distro.
-          write_log(LOG_ERR, "Task %s: Running on unsupported distro...\n", id);
-          sprintf(report.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
-          return NOTGIOS_TASK_FATAL;
+          RETURN_UNSUPPORTED_DISTRO(report, id);
         } 
       } else {
         write_log(LOG_DEBUG, "Task %s: Memory info collected...\n", id);
@@ -227,10 +236,19 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
       break;
     case CPU:
       retval = process_cpu_collect(pid, &report);
-      if (retval == NOTGIOS_UNSUPP_DISTRO) {
-        write_log(LOG_ERR, "Task %s: Running on unsupported distro...\n", id);
-        sprintf(report.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
-        return NOTGIOS_TASK_FATAL;
+      if (retval == NOTGIOS_NOPROC) {
+        if (check_stat()) {
+          write_log(LOG_ERR, "Task %s: Watched/Keepalive process is not running for collection.\n", id);
+          sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
+        } else {
+          // We can't even read from /proc/self/stat, which means it either doesn't exist, or we don't
+          // support the format it's using. Either way, we're done.
+          RETURN_UNSUPPORTED_DISTRO(report, id);
+        }
+      } else if (retval == NOTGIOS_UNSUPP_DISTRO) {
+        // Collection function encountered an error condition that suggests we're running on an
+        // unsupported distro.
+        RETURN_UNSUPPORTED_DISTRO(report, id);
       } else {
         write_log(LOG_DEBUG, "Task %s: CPU Time collected...\n", id);
       }
@@ -301,31 +319,69 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
   // Need to get systemwide, and per process, CPU information from /proc filesystem.
   // I know that this isn't guaranteed to work on every system, but at least most Linuxes seem to agree on the
   // format for per process stat files, and that the first line of /proc/stat should be used for total CPU stats.
-  sprintf(path, "proc/%hu/stat", pid);
+  sprintf(path, "/proc/%hu/stat", pid);
   FILE *pid_stats = fopen(path, "r");
   FILE *global_stats = fopen("/proc/stat", "r");
+
+  // Perform some error checking here.
+  // Process specific proc files only exist while their processes are running. If the process
+  // crashed in between now and the time we checked it, the pid_stats fopen will fail.
+  // If we're running on a distro that doesn't support any of these features, the fopens will
+  // also presumably fail.
+  // Don't know how likely any of this is, but we'll segfault if we don't check and it happens.
+  if (!pid_stats && !global_stats) {
+    return NOTGIOS_UNSUPP_DISTRO;
+  } else if (!global_stats) {
+    fclose(pid_stats);
+    return NOTGIOS_UNSUPP_DISTRO;
+  } else if (!pid_stats) {
+    fclose(global_stats);
+    return NOTGIOS_NOPROC;
+  }
 
   // The call we've all been waiting for!
   // Get the processor times the first time.
   // The stars in the format strings represent that the value exists but that we're not interested in it.
   retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &start_pid_user, &start_pid_sys);
   retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &start_user, &start_nice, &start_sys, &start_idle);
+  fclose(pid_stats);
+  fclose(global_stats);
 
   // Make sure the scanning was successful, and calculate our first values.
-  if (retvals[0] != 2 || retvals[1] != 4) return NOTGIOS_UNSUPP_DISTRO;
+  if (retvals[0] != 2 || retvals[1] != 4) {
+    fclose(pid_stats);
+    fclose(global_stats);
+    return NOTGIOS_NOPROC;
+  }
   start_pid_total = start_pid_user + start_pid_sys;
   start_global_total = start_user + start_nice + start_sys + start_idle;
 
   // Sleep for a second and get updated statistics.
   sleep(1);
 
+  // Reopen files for new values.
+  pid_stats = fopen(path, "r");
+  global_stats = fopen("/proc/stat", "r");
+
+  // If we've made it this far, we know we're running a supported distro, but the process could
+  // have crashed in the last second, so we need to check that again.
+  if (!pid_stats) {
+    fclose(global_stats);
+    return NOTGIOS_NOPROC;
+  }
+
   // Get the updated processor times.
-  // FIXME: Revisit this! I don't know if you have to reopen the stat files to see updated values.
   retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &end_pid_user, &end_pid_sys);
   retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle);
+  fclose(pid_stats);
+  fclose(global_stats);
 
   // Same deal as before.
-  if (retvals[0] != 2 || retvals[1] != 4) return NOTGIOS_UNSUPP_DISTRO;
+  if (retvals[0] != 2 || retvals[1] != 4) {
+    fclose(pid_stats);
+    fclose(global_stats);
+    return NOTGIOS_NOPROC;
+  }
   end_pid_total = end_pid_user + end_pid_sys;
   end_global_total = end_user + end_nice + end_sys + end_idle;
 
@@ -367,8 +423,35 @@ int total_io_collect(task_report_t *data) {
   // TODO: Write this function.
 }
 
+// Function checks whether or not it's possible to access memory statistics for our own process.
+// If not, means that whatever distro we're running on doesn't support it.
 int check_statm() {
   return !access("/proc/self/statm", F_OK);
+}
+
+// Function checks whether or not we can parse the CPU statistics for our own process.
+// If not, means that whatever distro we're running on doesn't use a format we support.
+int check_stat() {
+  FILE *stats = fopen("/proc/self/stat", "r");
+  FILE *global_stats = fopen("/proc/stat", "r");
+  if (stats && global_stats) {
+    int retvals[2], supported = 0;
+    unsigned long pid_user, pid_sys, global_user, global_nice, global_sys, global_idle;
+
+    // Parse that stuff.
+    retvals[0] = fscanf(stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &pid_user, &pid_sys);
+    retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &global_user, &global_nice, &global_sys, &global_idle);
+    if (retvals[0] == 2 && retvals[1] == 4) supported = 1;
+    
+    fclose(global_stats);
+    fclose(stats);
+    return supported;
+  } else if (!stats) {
+    fclose(global_stats);
+  } else if (!global_stats) {
+    fclose(stats);
+  }
+  return 0;
 }
 
 void init_task_report(task_report_t *report, char *id, task_type_t type, metric_type_t metric) {
