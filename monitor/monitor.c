@@ -694,7 +694,7 @@ int handle_directory_report(task_report_t *report, char *start, char *buffer) {
     write_log(LOG_DEBUG, "Monitor: Found an invalid directory report while sending reports...\n");
     return NOTGIOS_GENERIC_ERROR;
   }
-  sprintf(buffer, "%s\nID %s\nMEMORY %ld\n\n", start, report->id, (long) report->value);
+  sprintf(buffer, "%s\nID %s\nBYTES %ld\n\n", start, report->id, (long) report->value);
   return NOTGIOS_SUCCESS;
 }
 
