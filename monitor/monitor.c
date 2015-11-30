@@ -690,7 +690,12 @@ int handle_process_report(task_report_t *report, char *start, char *buffer) {
 }
 
 int handle_directory_report(task_report_t *report, char *start, char *buffer) {
-  // TODO: Implement this function.
+  if (report->metric != MEMORY) {
+    write_log(LOG_DEBUG, "Monitor: Found an invalid directory report while sending reports...\n");
+    return NOTGIOS_GENERIC_ERROR;
+  }
+  sprintf(buffer, "%s\nID %s\nMEMORY %ld\n\n", start, report->id, (long) report->value);
+  return NOTGIOS_SUCCESS;
 }
 
 int handle_disk_report(task_report_t *report, char *start, char *buffer) {
