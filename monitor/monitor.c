@@ -437,8 +437,8 @@ void handle_add(char **commands, char *reply_buf) {
       KEEPALIVE,
       PIDFILE,
       RUNCMD,
-      MNTPNT,
-      PATH
+      PATH,
+      MNTPNT
     };
     task_type_t option_categories[] = {
       PROCESS,
