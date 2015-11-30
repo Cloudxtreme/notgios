@@ -10,6 +10,7 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <netinet/in.h>
+#include <time.h>
 
 /*----- Local Includes -----*/
 
@@ -205,11 +206,18 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
           return NOTGIOS_TASK_FATAL;
         } 
       } else {
-        write_log(LOG_DEBUG, "Task %s: Memory info colleted...\n", id);
+        write_log(LOG_DEBUG, "Task %s: Memory info collected...\n", id);
       }
       break;
     case CPU:
       retval = process_cpu_collect(pid, &report);
+      if (retval == NOTGIOS_UNSUPP_DISTRO) {
+        write_log(LOG_ERR, "Task %s: Running on unsupported distro...\n", id);
+        sprintf(report.message, "FATAL CAUSE UNSUPPORTED_DISTRO");
+        return NOTGIOS_TASK_FATAL;
+      } else {
+        write_log(LOG_DEBUG, "Task %s: CPU Time collected...\n", id);
+      }
       break;
     case IO:
       retval = process_io_collect(pid, &report);
@@ -244,7 +252,7 @@ int handle_total(char *id, metric_type_t metric) {
 
 int process_memory_collect(uint16_t pid, task_report_t *data) {
   char path[NOTGIOS_MAX_PROC_LEN];
-  sprintf(path, "/proc/%u/statm", pid);
+  sprintf(path, "/proc/%hu/statm", pid);
   FILE *statm = fopen(path, "r");
   if (statm) {
     long usage;
@@ -257,8 +265,52 @@ int process_memory_collect(uint16_t pid, task_report_t *data) {
   }
 }
 
+// Function is responsible for calculating %CPU usage of the monitored process.
+// Currently uses the /proc pseudo-filesystem, which means that it's somewhat architecture independent,
+// (certainly Linux only) but all of the reading I've done on this makes this sound like pretty much
+// the only option.
 int process_cpu_collect(uint16_t pid, task_report_t *data) {
-  // TODO: Write this function.
+  unsigned long start_pid_user, end_pid_user, start_pid_sys, end_pid_sys, start_pid_total, end_pid_total;
+  unsigned long start_user, end_user, start_nice, end_nice, start_sys, end_sys, start_idle, end_idle;
+  unsigned long start_global_total, end_global_total;
+  int retvals[2];
+  char path[NOTGIOS_MAX_PROC_LEN];
+
+  // Need to get systemwide, and per process, CPU information from /proc filesystem.
+  // I know that this isn't guaranteed to work on every system, but at least most Linuxes seem to agree on the
+  // format for per process stat files, and that the first line of /proc/stat should be used for total CPU stats.
+  sprintf(path, "proc/%hu/stat", pid);
+  FILE *pid_stats = fopen(path, "r");
+  FILE *global_stats = fopen("/proc/stat", "r");
+
+  // The call we've all been waiting for!
+  // Get the processor times the first time.
+  // The stars in the format strings represent that the value exists but that we're not interested in it.
+  retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &start_pid_user, &start_pid_sys);
+  retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &start_user, &start_nice, &start_sys, &start_idle);
+
+  // Make sure the scanning was successful, and calculate our first values.
+  if (retvals[0] != 2 || retvals[1] != 4) return NOTGIOS_UNSUPP_DISTRO;
+  start_pid_total = start_pid_user + start_pid_sys;
+  start_global_total = start_user + start_nice + start_sys + start_idle;
+
+  // Sleep for a second and get updated statistics.
+  sleep(1);
+
+  // Get the updated processor times.
+  // FIXME: Revisit this! I don't know if you have to reopen the stat files to see updated values.
+  retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &end_user, &end_sys);
+  retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle);
+
+  // Same deal as before.
+  if (retvals[0] != 2 || retvals[1] != 4) return NOTGIOS_UNSUPP_DISTRO;
+  end_pid_total = end_pid_user + end_pid_sys;
+  end_global_total = end_user + end_nice + end_sys + end_idle;
+
+  // Perform the calculation.
+  data->percentage = (end_pid_total - start_pid_total) * 100 / (double) (end_global_total - start_global_total);
+
+  return NOTGIOS_SUCCESS;
 }
 
 int process_io_collect(uint16_t pid, task_report_t *data) {
