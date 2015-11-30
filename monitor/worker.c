@@ -238,7 +238,7 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
       retval = process_cpu_collect(pid, &report);
       if (retval == NOTGIOS_NOPROC) {
         if (check_stat()) {
-          write_log(LOG_ERR, "Task %s: Watched/Keepalive process is not running for collection.\n", id);
+          write_log(LOG_ERR, "Task %s: Watched/Keepalive process is not running for collection...\n", id);
           sprintf(report.message, "ERROR CAUSE PROC_NOT_RUNNING");
         } else {
           // We can't even read from /proc/self/stat, which means it either doesn't exist, or we don't
@@ -254,13 +254,22 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
       }
       break;
     case IO:
+      // This is currently unimplemented.
       retval = process_io_collect(pid, &report);
+      break;
     default:
       // We've been passed a task containing invalid options. Shouldn't happen, but handle it
       // for debugging.
       sprintf(report.message, "FATAL CAUSE INVALID_TASK");
       lpush(&reports, &report);
       return NOTGIOS_GENERIC_ERROR;
+  }
+
+  if (retval == NOTGIOS_UNSUPP_TASK) {
+    write_log(LOG_DEBUG, "Task %s: Received an unsupported task. Removing...");
+    sprintf(report.message, "FATAL CAUSE UNSUPPORTED_TASK");
+    lpush(&reports, &report);
+    return NOTGIOS_TASK_FATAL;
   }
 
   // Enqueue metrics for sending.
@@ -296,9 +305,13 @@ int process_memory_collect(uint16_t pid, task_report_t *data) {
   FILE *statm = fopen(path, "r");
   if (statm) {
     long usage;
-    fscanf(statm, "%ld", &usage);
-    data->value = (double) usage;
-    return NOTGIOS_SUCCESS;
+    int retval = fscanf(statm, "%ld", &usage);
+    if (retval == 1) {
+      data->value = (double) usage;
+      return NOTGIOS_SUCCESS;
+    } else {
+      return NOTGIOS_NOPROC;
+    }
   } else {
     // Can't open memory file. Return error to our calling function and let it figure things out.
     return NOTGIOS_NOPROC;
@@ -391,8 +404,12 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
   return NOTGIOS_SUCCESS;
 }
 
+// This function, will, someday attempt to discern a way to get per process IO statistics.
+// For now it's unimplemented.
+// TODO: Write this function.
 int process_io_collect(uint16_t pid, task_report_t *data) {
-  // TODO: Write this function.
+  // I'll write this function someday when I have time.
+  return NOTGIOS_UNSUPP_TASK;
 }
 
 int directory_memory_collect(uint16_t pid, task_report_t *data) {

@@ -35,6 +35,7 @@
 #define NOTGIOS_TOO_MANY_ARGS -0x40
 #define NOTGIOS_EXEC_FAILED -0x80
 #define NOTGIOS_UNSUPP_DISTRO -0x100
+#define NOTGIOS_UNSUPP_TASK -0x200
 
 /*----- Macro Declarations -----*/
 
