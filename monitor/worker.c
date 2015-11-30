@@ -67,6 +67,15 @@ int run_task(task_type_t type, metric_type_t metric, task_option_t *options, cha
       return handle_load(id);
     case TOTAL:
       return handle_total(id, metric);
+    default: {
+      // We've been passed an incorrectly initialized task. Shouldn't happen, but handle
+      // for debugging. Plus it gets GCC off my case.
+      task_report_t report;
+      init_task_report(&report, id, type, metric);
+      sprintf(report.message, "FATAL CAUSE INVALID_TASK");
+      lpush(&reports, &report);
+      return NOTGIOS_GENERIC_ERROR;
+    }
   }
 }
 
@@ -91,7 +100,14 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
         runcmd = option->value;
         break;
       case EMPTY:
+        // User chose not to specify and option. This is fine, move on.
         break;
+      default:
+        // We've been passed a task containing invalid options. Shouldn't happen, but handle
+        // it for debugging.
+        sprintf(report.message, "FATAL CAUSE INVALID_TASK");
+        lpush(&reports, &report);
+        return NOTGIOS_GENERIC_ERROR;
     }
   }
   write_log(LOG_DEBUG, "Task %s: Finished parsing arguments for task...\n", id);
@@ -221,6 +237,12 @@ int handle_process(metric_type_t metric, task_option_t *options, char *id) {
       break;
     case IO:
       retval = process_io_collect(pid, &report);
+    default:
+      // We've been passed a task containing invalid options. Shouldn't happen, but handle it
+      // for debugging.
+      sprintf(report.message, "FATAL CAUSE INVALID_TASK");
+      lpush(&reports, &report);
+      return NOTGIOS_GENERIC_ERROR;
   }
 
   // Enqueue metrics for sending.
@@ -299,7 +321,7 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
 
   // Get the updated processor times.
   // FIXME: Revisit this! I don't know if you have to reopen the stat files to see updated values.
-  retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &end_user, &end_sys);
+  retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &end_pid_user, &end_pid_sys);
   retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle);
 
   // Same deal as before.

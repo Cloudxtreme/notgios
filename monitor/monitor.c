@@ -345,10 +345,18 @@ void *launch_worker_thread(void *voidargs) {
     // Make the magic happen.
     int retval = run_task(type, metric, options, id);
 
-    // If we encountered a fatal error, message to front end has already been queued, so
-    // remove the task.
+    // Check error conditions.
     if (retval == NOTGIOS_TASK_FATAL) {
+      // If we encountered a fatal error, message to front end has already been queued, so
+      // remove the task.
       write_log(LOG_ERR, "Task %s: Encountered a fatal error, exiting...\n", id);
+      control->dropped = 1;
+      pthread_mutex_unlock(&control->mutex);
+      return NULL;
+    } else if (retval == NOTGIOS_GENERIC_ERROR) {
+      // This shouldn't happen, but would indicate that an incorrectly initialized task slipped
+      // into things. Keeping around for debugging purposes.
+      write_log(LOG_ERR, "Task %s: Initialization of task appears invalid, exiting...\n", id);
       control->dropped = 1;
       pthread_mutex_unlock(&control->mutex);
       return NULL;
@@ -698,7 +706,7 @@ int handle_total_report(task_report_t *report, char *start, char *buffer) {
 // any reason. The first type assumes the server will send over all tasks for this host, and
 // the second does not.
 int handshake(char *server_hostname, int port, int initial) {
-  int sockfd, actual = 0, sleep_period = 1;
+  int sockfd, sleep_period = 1;
   struct sockaddr_in serv_addr;
   struct hostent *server;
   char buffer[NOTGIOS_STATIC_BUFSIZE];
@@ -857,7 +865,7 @@ int parse_commands(char **output, char *input) {
   do {
     if (elem == 16) return NOTGIOS_TOO_MANY_ARGS;
     output[elem++] = current;
-  } while (current = strtok(NULL, "\n"));
+  } while ((current = strtok(NULL, "\n")));
   return NOTGIOS_SUCCESS;
 }
 
