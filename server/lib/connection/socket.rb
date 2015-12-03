@@ -5,6 +5,7 @@ require_relative '../helpers'
 module Notgios
   module Connection
 
+    KEEPALIVE_TIME = 10
     NoHostError = Class.new(StandardError)
     PortInUseError = Class.new(StandardError)
     NotSupportedError = Class.new(StandardError)
@@ -66,7 +67,7 @@ module Notgios
         0
       end
 
-      def read(timeout = 20)
+      def read(timeout = KEEPALIVE_TIME * 2)
         raise NotSupportedError, 'Not a readable socket' if @server
         raise SocketClosedError, 'Already called close' unless @socket.exists?
 
@@ -89,6 +90,8 @@ module Notgios
       def close
         @socket.close
         @socket = nil
+      rescue IOError
+        nil
       end
 
     end
