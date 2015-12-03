@@ -11,7 +11,8 @@ module Notgios
 
     class NotgiosSocket
 
-      def initialize(host: nil, port: nil, socket: nil)
+      def initialize(host: nil, port: nil, socket: nil, tries: 0)
+        retry_counter = 0
         if socket
           @socket = socket
         else
@@ -21,6 +22,14 @@ module Notgios
         end
       rescue Errno::EADDRINUSE
         raise PortInUseError, "Port #{port} has already been bound to"
+      rescue Errno::ECONNREFUSED
+        if tries > 0
+          sleep 2 ** retry_counter
+          tries -= 1
+          retry
+        else
+          raise ConnectionRefusedError, 'Nobody\'s listening...'
+        end
       rescue SocketError
         raise NoHostError, 'Supplied host cannot be found'
       end
@@ -63,7 +72,7 @@ module Notgios
           if tmp.exists?
             until tmp == "\n"
               message += tmp
-              tmp = gets
+              tmp = @socket.gets
             end
             message.split("\n")
           else
