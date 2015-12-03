@@ -8,6 +8,7 @@ module Notgios
     PortInUseError = Class.new(StandardError)
     NotSupportedError = Class.new(StandardError)
     SocketClosedError = Class.new(StandardError)
+    ConnectionRefusedError = Class.new(StandardError)
 
     class NotgiosSocket
 
@@ -26,6 +27,7 @@ module Notgios
         if tries > 0
           sleep 2 ** retry_counter
           tries -= 1
+          retry_counter += 1
           retry
         else
           raise ConnectionRefusedError, 'Nobody\'s listening...'
