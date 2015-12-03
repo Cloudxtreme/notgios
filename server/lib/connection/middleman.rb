@@ -29,6 +29,16 @@ module Notgios
         start_supervisor_thread
       end
 
+      # Function used by server to send a command to a monitor.
+      def enqueue_command(address, command)
+        @connection_lock.synchronize { @conntions[address].queue.push(command) }
+      end
+
+      # Function used by server to read any errors sent by monitors.
+      def dequeue_error
+        @error_queue.pop unless @error_queue.empty?
+      end
+
       private
 
       CONNECT_TIME = 1
@@ -88,6 +98,13 @@ module Notgios
         end
       end
 
+      # TODO: Need to implement this function.
+      # Method handles sending metrics to their appropriate list in Redis, and responding to
+      # any errors.
+      def handle_monitor_message(message, monitor, redis)
+
+      end
+
       # This method starts the individual monitor handling threads.
       # These threads handle all communication with the monitors after the initial handshake
       # is completed.
@@ -119,7 +136,7 @@ module Notgios
                     keepalive_timer = Time.now
                     break
                   elsif message.first.exists?
-                    handle_metrics(message, monitor, redis)
+                    handle_monitor_message(message, monitor, redis)
                   else
                     # Monitor failed to send keepalive, continue under the assumption that it's dead.
                     raise SocketClosedError
@@ -133,7 +150,7 @@ module Notgios
                 # fine with it.
                 send_command(socket, command_queue.pop, tasks) until command_queue.empty?
                 message = socket.read((10 - (Time.now - keepalive_timer)).abs)
-                handle_metrics(message, monitor, redis) unless message.empty?
+                handle_monitor_message(message, monitor, redis) unless message.empty?
               end
             end
 
