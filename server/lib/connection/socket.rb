@@ -4,11 +4,11 @@ module Notgios
   module Connection
 
     NoHostError = Class.new(StandardError)
-    PortInUseError = Class.new(StardardError)
+    PortInUseError = Class.new(StandardError)
     NotSupportedError = Class.new(StandardError)
     SocketClosedError = Class.new(StandardError)
 
-    class Socket
+    class NotgiosSocket
 
       def initialize(host = nil, port, server: false)
         @server = server
