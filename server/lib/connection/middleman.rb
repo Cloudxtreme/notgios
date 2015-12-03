@@ -78,10 +78,10 @@ module Notgios
           socket.write([
             "NGS JOB ADD",
             "ID #{cmd.id}",
-            "TYPE #{cmd.type}",
-            "METRIC #{cmd.metric}",
+            "TYPE #{cmd.type.upcase}",
+            "METRIC #{cmd.metric.upcate}",
             "FREQ #{cmd.freq}"
-          ].concat(cmd.options))
+          ].concat(cmd.options.map(&:upcase)))
           tasks.push(cmd) if tasks.exists?
         when :pause
           socket.write([
