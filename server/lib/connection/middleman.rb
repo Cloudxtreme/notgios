@@ -30,6 +30,8 @@ module Notgios
 
       def send_command(socket, cmd)
         valid = true
+
+        # Send command to monitor.
         case cmd.command
         when :add
           socket.write([
@@ -58,6 +60,15 @@ module Notgios
           # Invalid task was found, scream about it so someone will notice.
           # FIXME: Need to have a proper logger to write this to.
           valid = false
+        end
+
+        # Get the response from the monitor.
+        if valid
+          message = socket.read
+          if message.first == 'NGS NACK'
+            message[1] =~ /CAUSE (.*)/
+            @error_queue.push(ErrorStruct.new(cmd.id, $1))
+          end
         end
       end
 
@@ -89,7 +100,7 @@ module Notgios
                   @connections[ip_address].socket = socket
 
                   # Send the tasks.
-                  @connections[ip_address].tasks { |task| send_task(socket, task) }
+                  @connections[ip_address].tasks { |task| send_command(socket, task) }
 
                   # Start communication thread.
                 else
