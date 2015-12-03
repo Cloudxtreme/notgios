@@ -38,13 +38,13 @@ module Notgios
         raise NotSupportedError, 'Not a writable socket' if @server
         raise SocketClosedError, 'Already called close' unless @socket.exists?
 
-        write = nonblocking ? :write_nonblock : :write
+        meth = nonblocking ? :write_nonblock : :write
         case msg
         when Array
           sendable = msg.take_while { |line| line.class == String }
-          @socket.send(write, sendable.join("\n") + "\n\n")
+          @socket.send(meth, sendable.join("\n") + "\n\n")
         when String
-          @socket.send(write, msg + "\n\n")
+          @socket.send(meth, msg + "\n\n")
           @socket.write(msg + "\n\n")
         else
           raise ArgumentError, 'Object not writable'
