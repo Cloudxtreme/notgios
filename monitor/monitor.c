@@ -27,18 +27,20 @@
 // from the function it was called in. Uses NOTGIOS_STATIC_BUFSIZE directly as the size of
 // the buffer (instead of taking it as a parameter). Only meant to be called from the
 // handle_add and handle_reschedule functions.
-#define RETURN_NACK(buf, msg)                                       \
-  do {                                                              \
-    memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);          \
-    sprintf(buf, "NGS NACK\nCAUSE %s\n\n", msg);                    \
-    return;                                                         \
+#define RETURN_NACK(buf, msg)                                               \
+  do {                                                                      \
+    write_log(LOG_ERR, "Monitor: Sending a NACK because of %s...\n", msg);  \
+    memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);                  \
+    sprintf(buf, "NGS NACK\nCAUSE %s\n\n", msg);                            \
+    return;                                                                 \
   } while (0);
 
-#define RETURN_ACK(buf)                                             \
-  do {                                                              \
-    memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);          \
-    sprintf(buf, "NGS ACK\n\n");                                    \
-    return;                                                         \
+#define RETURN_ACK(buf)                                                     \
+  do {                                                                      \
+    write_log(LOG_DEBUG, "Monitor: Sending an ACK...\n");                   \
+    memset(buf, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);                  \
+    sprintf(buf, "NGS ACK\n\n");                                            \
+    return;                                                                 \
   } while (0);
 
 // This is not supposed to be a generic max function, and has tons of pitfalls.
@@ -866,6 +868,7 @@ thread_control_t *create_thread_control() {
 void destroy_thread_control(void *voidarg) {
   thread_control_t *control = voidarg;
   if (control) {
+    pthread_cond_broadcast(&control->signal);
     pthread_cond_destroy(&control->signal);
     pthread_mutex_destroy(&control->mutex);
     free(control);
@@ -905,6 +908,7 @@ void remove_dead() {
     }
   }
   free(tasks);
+  write_log(LOG_DEBUG, "Monitor: Finished cleaning up dead tasks...\n");
 }
 
 void increment_stats(task_type_t type, char *id) {

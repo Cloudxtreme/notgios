@@ -369,12 +369,12 @@ hash_node_t *remove_hash_node(hash_node_t *head, char *key, void (*destruct) (vo
         if (prev) {
           // Normal case.
           hash_node_t *tmp = current->next;
-          destruct(current);
+          destroy_hash_node(current, destruct);
           prev->next = tmp;
           return head;
         } else {
           // We need to remove the head.
-          destruct(head);
+          destroy_hash_node(head, destruct);
           return head->next;
         }
       }
