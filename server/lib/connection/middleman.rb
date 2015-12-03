@@ -2,13 +2,33 @@
 require_relative 'socket'
 require 'thread'
 require 'redis'
+require 'json'
 
 module Notgios
   module Connection
 
+    # Command Struct Field Types:
+    # id - Fixnum
+    # command - Symbol
+    # type - Symbol/String
+    # freq - Fixnum/String
+    # metrix - Symbol/String
+    # options - Array of strings already in backend format.
     CommandStruct = Struct.new(:id, :command, :type, :freq, :metric, :options)
+
+    # Monitor Struct Field Types:
+    # socket - NotgiosSocket
+    # tasks - Array of CommandStructs
+    # queue - Queue
+    # address - String
+    # redis - Redis
     MonitorStruct = Struct.new(:socket, :tasks, :queue, :address, :redis)
-    ErrorStruct = Struct.new(:id, :cause)
+
+    # Error Struct Field Types:
+    # id - Fixnum
+    # cause - String
+    # severity - Symbol
+    ErrorStruct = Struct.new(:id, :cause, :severity)
 
     class MiddleMan
 
@@ -93,7 +113,7 @@ module Notgios
             # NACKs can only be sent during adds, so something went wrong. Enqueue it to let the
             # server know.
             cause = message[1].scan(/\w+/)[1]
-            @error_queue.push(ErrorStruct.new(cmd.id, cause))
+            @error_queue.push(ErrorStruct.new(cmd.id, cause, :nack))
           end
         end
       end
@@ -102,7 +122,23 @@ module Notgios
       # Method handles sending metrics to their appropriate list in Redis, and responding to
       # any errors.
       def handle_monitor_message(message, monitor, redis)
+        unless message.first == 'NGS JOB REPORT'
+          # We've received an invalid job report. Shouldn't ever happen, but hey, the Apollo 13
+          # near catastrophe was caused by a supposedly impossible quadruple failure on the regulator
+          # of an oxygen canister. Shit happens. Log it, move on.
+          # FIXME: Need to add a proper logger.
+          return
+        end
 
+        id = message[1].scan(/\d+/).first.to_i
+        if message[2].index('FATAL').exists? || message[2].index('ERROR').exists?
+          # We've encountered an error. Push it onto the error queue and move on.
+          cause = message[2].scan(/\w+/)[2]
+          @error_queue.push(ErrorStruct.new(id, cause, message[2].index('FATAL').exists? ? :fatal : :error))
+        else
+          # We have a valid report, push the results onto the appropriate Redis list.
+          redis.lpush("notgios.reports.#{id}", messages.slice(2..-1).to_json)
+        end
       end
 
       # This method starts the individual monitor handling threads.
