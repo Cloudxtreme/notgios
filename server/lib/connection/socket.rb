@@ -87,6 +87,10 @@ module Notgios
         end
       end
 
+      def peeraddr
+        @socket.peeraddr
+      end
+
       def close
         @socket.close
         @socket = nil
