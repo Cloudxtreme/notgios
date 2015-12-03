@@ -1,4 +1,5 @@
 require 'socket'
+require '../helpers'
 
 module Notgios
   module Connection
@@ -10,14 +11,13 @@ module Notgios
 
     class NotgiosSocket
 
-      def initialize(host = nil, port, server: false)
-        @server = server
-
-        if @server
-          @socket = TCPServer.new(port)
+      def initialize(host: nil, port: nil, socket: nil)
+        if socket
+          @socket = socket
         else
-          raise ArgumentError, 'Host cannot be nil' unless host.exists?
-          @socket = TCPSocket.new(host, port)
+          raise ArgumentError, 'Port cannot be nil' unless port.exists?
+          @server = host.nil?
+          @socket = @server ? TCPServer.new(port) : TCPSocket.new(host, port)
         end
       rescue Errno::EADDRINUSE
         raise PortInUseError, "Port #{port} has already been bound to"
@@ -29,11 +29,7 @@ module Notgios
         raise NotSupportedError, 'Not a server socket' unless @server
         raise SocketClosedError, 'Already called close' unless @socket.exists?
 
-        if wait
-          @socket.accept
-        else
-          @socket.accept_nonblock
-        end
+        NotgiosSocket.new(socket: wait ? @socket.accept : @socket.accept_nonblock)
       rescue IO::WaitReadable
         nil
       end
@@ -46,9 +42,9 @@ module Notgios
         case msg
         when Array
           sendable = msg.take_while { |line| line.class == String }
-          @socket.call(write, sendable.join("\n") + "\n\n")
+          @socket.send(write, sendable.join("\n") + "\n\n")
         when String
-          @socket.call(write, msg + "\n\n")
+          @socket.send(write, msg + "\n\n")
           @socket.write(msg + "\n\n")
         else
           raise ArgumentError, 'Object not writable'
