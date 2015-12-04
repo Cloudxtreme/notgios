@@ -27,7 +27,7 @@ module Notgios
     def authenticate_user(username, pass)
       raise NoSuchResourceError, "User #{username} does not exist." unless exists("notgios.users.#{username}")
       salt = hget("notgios.users.#{username}", 'salt')
-      crypted = hget("notgios.users.#{username}, 'crypted'")
+      crypted = hget("notgios.users.#{username}", 'password')
       crypted == Digest::SHA256.hexdigest("#{pass}|#{salt}")
     end
 
@@ -90,8 +90,6 @@ module Notgios
     end
 
     # Only to be used during startup.
-    # FIXME: This needs to be written. I suddenly realized that I'm not currently maintaining a
-    # task->server mapping or vice versa, which I'll need to write this. So I'll have to fix that.
     def get_all_jobs
       jobs = Hash.new { |h, k| h[k] = Array.new }
       smembers("notgios.users").each do |user|
@@ -99,8 +97,10 @@ module Notgios
           job_hash = hgetall("notgios.jobs.#{job}")
           command = CommandStruct.new
           job_hash.each_pair { |key, value| command.send(key + '=', value) }
+          jobs[job_hash['host']].push(command)
         end
       end
+      jobs
     end
 
     # Expects:

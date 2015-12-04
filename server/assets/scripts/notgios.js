@@ -43,19 +43,46 @@ notgios.controller('contactController', ['$scope', '$http', function ($scope, $h
 
 }]);
 
-notgios.controller('navbarController', ['$scope', '$http', '$route', function ($scope, $http, $route) {
+notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies', function ($scope, $http, $route, $cookies) {
+
+  $scope.loggedIn = $cookies.get('token') != null;
 
   $scope.isActive = function (path) {
     if ($route.current && $route.current.regexp) return $route.current.regexp.test(path);
     return false;
   }
 
-  $scope.login = function () {
-
+  $scope.login = function ($event) {
+    $event.stopPropagation();
+    if ($scope.user && $scope.pass) {
+      $http({
+        method: 'POST',
+        url: 'sign_in',
+        data: {
+          username: $scope.user,
+          password: $scope.pass
+        }
+      }).then(function success(response) {
+        $scope.submissionError = '';
+        $cookies.put('token', response.data)
+        $scope.loggedIn = true;
+      }, function failure(response) {
+        if (response.status == 400) $scope.loginError = 'User does not exist.'
+        else $scope.loginError = 'Password is incorrect';
+      });
+    } else {
+      $scope.loginError = 'Please enter both a username and a password.';
+    }
   };
+
+  $scope.logout = function () {
+    $cookies.remove('token');
+    $scope.loggedIn = false;
+  };
+
 }]);
 
-notgios.controller('signupController', ['$scope', '$http', '$cookieStore', function ($scope, $http, $cookieStore) {
+notgios.controller('signupController', ['$scope', '$http', '$cookies', function ($scope, $http, $cookies) {
 
   $scope.dropdown = 'Phone Number';
 
@@ -79,7 +106,7 @@ notgios.controller('signupController', ['$scope', '$http', '$cookieStore', funct
           }
         }).then(function success(response) {
           $scope.submissionError = '';
-          $cookieStore.put('token', response.data);
+          $cookies.put('token', response.data);
         }, function failure(response) {
           $event.stopPropagation();
           if (response.status == 400) $scope.submissionError = 'A user with that name already exists. Please pick another';

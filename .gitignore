@@ -1,5 +1,6 @@
 *.swp
 *.o
 *.DS_Store
+*.byebug_history
 bin/*
 obj/*

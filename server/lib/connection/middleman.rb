@@ -6,13 +6,12 @@ module Notgios
     # tasks - Array of CommandStructs
     # queue - Queue
     # address - String
-    # nodis - Nodis
-    MonitorStruct = Struct.new(:socket, :tasks, :queue, :address, :nodis)
+    MonitorStruct = Struct.new(:socket, :tasks, :queue, :address)
 
     class MiddleMan
 
       # FIXME: Need to set up a proper logger here.
-      def initialize(listen_port, tasks, redis_host, redis_port, logger = Logger.new)
+      def initialize(listen_port, tasks, logger = Logger.new(STDOUT))
         @listen_socket = NotgiosSocket.new(port: listen_port)
         @connections, @connection_lock = Hash.new, Mutex.new
         @monitor_handlers = Hash.new
@@ -23,7 +22,7 @@ module Notgios
 
         # I don't think the MiddleMan should be connecting to SQL directly, after all, it's the middle man.
         # Therefore, server will provide us with all currently existing tasks during startup.
-        tasks.each_pair { |monitor_address, commands| @connections[monitor_address] = MonitorStruct.new(nil, commands, Queue.new, nil, Nodis.new(host: redis_host, port: redis_port)) }
+        tasks.each_pair { |monitor_address, commands| @connections[monitor_address] = MonitorStruct.new(nil, commands, Queue.new, nil) }
 
         start_listening_thread
         start_supervisor_thread
@@ -155,53 +154,54 @@ module Notgios
       # Synchronization on monitor_handlers needs to be revisited in general.
       def start_monitor_handler(monitor)
         handler = Thread.new do
-          nodis = monitor.nodis
           socket = monitor.socket
           command_queue = monitor.queue
           keepalive_timer = Time.now
           begin
-            # Spin until the server initiates an orderly shutdown, or until we encounter a socket
-            # error.
-            until Thread.current[:should_halt].exists?
-              if Time.now - keepalive_timer >= KEEPALIVE_TIME
-                # It's time to send a keepalive message!
-                @logger.debug('MiddleMan Handler: Sending keepalive message...')
-                socket.write('NGS STILL THERE?')
+            Helpers.with_nodis do |nodis|
+              # Spin until the server initiates an orderly shutdown, or until we encounter a socket
+              # error.
+              until Thread.current[:should_halt].exists?
+                if Time.now - keepalive_timer >= KEEPALIVE_TIME
+                  # It's time to send a keepalive message!
+                  @logger.debug('MiddleMan Handler: Sending keepalive message...')
+                  socket.write('NGS STILL THERE?')
 
-                # Conceptually this spins until it receives a keepalive response or gives up,
-                # but I'm putting the condition here for shutdown purposes.
-                until Thread.current[:should_halt].exists?
-                  message = socket.read(KEEPALIVE_TIME)
-                  if message.first.exists? && message.first == 'NGS STILL HERE!'
-                    @logger.debug('MiddleMan Handler: Received keepalive response...')
-                    keepalive_timer = Time.now
-                    break
-                  elsif message.first.exists?
-                    handle_monitor_message(message, monitor, nodis)
-                  else
-                    # Monitor failed to send keepalive, continue under the assumption that it's dead.
-                    @logger.error('MiddleMan Handler: Monitor failed to send keepalive, exiting...')
-                    raise SocketClosedError
+                  # Conceptually this spins until it receives a keepalive response or gives up,
+                  # but I'm putting the condition here for shutdown purposes.
+                  until Thread.current[:should_halt].exists?
+                    message = socket.read(KEEPALIVE_TIME)
+                    if message.first.exists? && message.first == 'NGS STILL HERE!'
+                      @logger.debug('MiddleMan Handler: Received keepalive response...')
+                      keepalive_timer = Time.now
+                      break
+                    elsif message.first.exists?
+                      handle_monitor_message(message, monitor, nodis)
+                    else
+                      # Monitor failed to send keepalive, continue under the assumption that it's dead.
+                      @logger.error('MiddleMan Handler: Monitor failed to send keepalive, exiting...')
+                      raise SocketClosedError
+                    end
                   end
+                else
+                  # Check if any commands have been enqueued for us. If this were very performance
+                  # intensive I should really set up a signaling system so that the handler could
+                  # block on the queue but still send keepalive messages, but its not, so I won't
+                  # bother. As long as commands get sent within 10 seconds I'm sure people will be
+                  # fine with it.
+                  send_command(socket, command_queue.pop) until command_queue.empty?
+                  message = socket.read((10 - (Time.now - keepalive_timer)).abs)
+                  handle_monitor_message(message, monitor, nodis) unless message.empty?
                 end
-              else
-                # Check if any commands have been enqueued for us. If this were very performance
-                # intensive I should really set up a signaling system so that the handler could
-                # block on the queue but still send keepalive messages, but its not, so I won't
-                # bother. As long as commands get sent within 10 seconds I'm sure people will be
-                # fine with it.
-                send_command(socket, command_queue.pop) until command_queue.empty?
-                message = socket.read((10 - (Time.now - keepalive_timer)).abs)
-                handle_monitor_message(message, monitor, nodis) unless message.empty?
               end
-            end
 
-            # We can only reach this point if the server initiated an orderly shutdown.
-            # Let the monitor know.
-            @logger.debug('MiddleMan Handler: Beginning orderly shutdown...')
-            socket.write('NGS BYE')
-            socket.close
-            @dead_handlers.push(handler)
+              # We can only reach this point if the server initiated an orderly shutdown.
+              # Let the monitor know.
+              @logger.debug('MiddleMan Handler: Beginning orderly shutdown...')
+              socket.write('NGS BYE')
+              socket.close
+              @dead_handlers.push(handler)
+            end
           rescue SocketClosedError
             @logger.error('MiddleMan Handler: Encountered an error with the monitor socket, exiting...')
             socket.close

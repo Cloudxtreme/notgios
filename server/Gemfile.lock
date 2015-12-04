@@ -1,9 +1,12 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    byebug (8.2.1)
     jwt (1.5.2)
     puma (2.15.3)
     rack (1.6.4)
+    rack-parser (0.6.1)
+      rack
     rack-protection (1.5.3)
       rack
     redis (3.2.2)
@@ -17,8 +20,10 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  byebug
   jwt
   puma
+  rack-parser
   redis
   sinatra
 

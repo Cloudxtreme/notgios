@@ -13,7 +13,7 @@ module Notgios
     end
 
     post '/sign_up' do
-      with_nodis do |nodis|
+      Helpers.with_nodis do |nodis|
         begin
           nodis.add_user(params[:username], params[:password])
           AuthToken.encode({ username: params[:username] })
@@ -24,14 +24,14 @@ module Notgios
     end
 
     post '/sign_in' do
-      with_nodis do |nodis|
+      Helpers.with_nodis do |nodis|
         begin
           if nodis.authenticate_user(params[:username], params[:password])
             AuthToken.encode({ username: params[:username] })
           else
             halt 401
           end
-        rescue NoSuchResourceError
+        rescue Nodis::NoSuchResourceError
           halt 400
         end
       end
