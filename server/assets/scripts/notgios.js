@@ -71,13 +71,19 @@ notgios.controller('signupController', ['$scope', '$http', '$cookieStore', funct
       if ($scope.password == $scope.passConfirm && $scope.contact && $scope.contact.length > 0) {
         $http({
           method: 'POST',
-          url: '/sign_up'
+          url: '/sign_up',
+          data: {
+            username: $scope.username,
+            password: $scope.password,
+            contact: $scope.contact
+          }
         }).then(function success(response) {
           $scope.submissionError = '';
           $cookieStore.put('token', response.data);
         }, function failure(response) {
           $event.stopPropagation();
-          $scope.submissionError = 'There was an error during submission. Please check your internet and try again.';
+          if (response.status == 400) $scope.submissionError = 'A user with that name already exists. Please pick another';
+          else $scope.submissionError = 'There was an error during submission. Please check your internet and try again.';
         });
       } else {
         $event.stopPropagation();

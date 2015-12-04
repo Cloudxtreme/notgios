@@ -12,7 +12,7 @@ module Notgios
     class MiddleMan
 
       # FIXME: Need to set up a proper logger here.
-      def initialize(listen_port, tasks, redis_host, redis_port, logger)
+      def initialize(listen_port, tasks, redis_host, redis_port, logger = Logger.new)
         @listen_socket = NotgiosSocket.new(port: listen_port)
         @connections, @connection_lock = Hash.new, Mutex.new
         @monitor_handlers = Hash.new

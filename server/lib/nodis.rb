@@ -81,12 +81,26 @@ module Notgios
       raise WrongUserError, "Job #{id} is not owned by user #{username}" unless sismember("notgios.users.#{username}.jobs", id)
       raise NoSuchResourceError unless exists("notgios.jobs.#{id}")
       job = CommandStruct.new
-      hgetall("nogios.jobs.#{id}").each_pair do |key, value|
+      hgetall("notgios.jobs.#{id}").each_pair do |key, value|
         job.send(key + '=', value)
       end
       job
     rescue NoMethodError, ArgumentError
       raise InvalidJobError, "Job #{id} exists but is malformatted"
+    end
+
+    # Only to be used during startup.
+    # FIXME: This needs to be written. I suddenly realized that I'm not currently maintaining a
+    # task->server mapping or vice versa, which I'll need to write this. So I'll have to fix that.
+    def get_all_jobs
+      jobs = Hash.new { |h, k| h[k] = Array.new }
+      smembers("notgios.users").each do |user|
+        smembers("notgios.users.#{user}.jobs").each do |job|
+          job_hash = hgetall("notgios.jobs.#{job}")
+          command = CommandStruct.new
+          job_hash.each_pair { |key, value| command.send(key + '=', value) }
+        end
+      end
     end
 
     # Expects:

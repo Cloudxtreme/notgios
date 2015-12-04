@@ -22,6 +22,9 @@ module Notgios
 
   CONFIG = YAML::load_file(File.join($ROOT, 'config', 'notgios.yml'))
   SERVER_PORT = CONFIG['server_port']
+  REDIS_HOST = CONFIG['redis_host']
+  REDIS_PORT = CONFIG['redis_port']
+  AUTH_SECRET = CONFIG['auth_secret'] || SecureRandom.hex(16)
 
   # Command Struct Field Types:
   # id - Fixnum, task id.
@@ -49,9 +52,14 @@ end
 
 # Local Requirements
 require 'lib/helpers'
+require 'lib/authtoken'
 require 'lib/ssh_session'
 require 'lib/connection/socket'
 require 'lib/connection/middleman'
 require 'notgios'
+
+module Notgios
+  MIDDLEMAN = MiddleMan.new
+end
 
 run Notgios::Server
