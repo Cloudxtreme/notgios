@@ -1,28 +1,13 @@
 module Notgios
   module Connection
 
-    # Command Struct Field Types:
-    # id - Fixnum
-    # command - Symbol
-    # type - Symbol/String
-    # freq - Fixnum/String
-    # metrix - Symbol/String
-    # options - Array of strings already in backend format.
-    CommandStruct = Struct.new(:id, :command, :type, :freq, :metric, :options)
-
     # Monitor Struct Field Types:
     # socket - NotgiosSocket
     # tasks - Array of CommandStructs
     # queue - Queue
     # address - String
-    # redis - Redis
-    MonitorStruct = Struct.new(:socket, :tasks, :queue, :address, :redis)
-
-    # Error Struct Field Types:
-    # id - Fixnum
-    # cause - String
-    # severity - Symbol
-    ErrorStruct = Struct.new(:id, :cause, :severity)
+    # nodis - Nodis
+    MonitorStruct = Struct.new(:socket, :tasks, :queue, :address, :nodis)
 
     class MiddleMan
 
@@ -33,13 +18,12 @@ module Notgios
         @monitor_handlers = Hash.new
         @dead_handlers = Queue.new
         @error_queue = Queue.new
-        @redis = Redis.new(host: redis_host, port: redis_port)
         @logger = logger
         @logger.info('MiddleMan: And so it begins...')
 
         # I don't think the MiddleMan should be connecting to SQL directly, after all, it's the middle man.
         # Therefore, server will provide us with all currently existing tasks during startup.
-        tasks.each_pair { |monitor_address, commands| @connections[monitor_address] = MonitorStruct.new(nil, commands, Queue.new, nil, Redis.new(host: redis_host, port: redis_port)) }
+        tasks.each_pair { |monitor_address, commands| @connections[monitor_address] = MonitorStruct.new(nil, commands, Queue.new, nil, Nodis.new(host: redis_host, port: redis_port)) }
 
         start_listening_thread
         start_supervisor_thread
@@ -125,7 +109,7 @@ module Notgios
 
       # Method handles sending metrics to their appropriate list in Redis, and responding to
       # any errors.
-      def handle_monitor_message(message, monitor, redis)
+      def handle_monitor_message(message, monitor, nodis)
         unless message.first == 'NGS JOB REPORT'
           # We've received an invalid job report. Shouldn't ever happen, but hey, the Apollo 13
           # near catastrophe was caused by a supposedly impossible quadruple failure on the regulator
@@ -149,8 +133,15 @@ module Notgios
           @error_queue.push(ErrorStruct.new(id, cause, severity))
         else
           # We have a valid report, push the results onto the appropriate Redis list.
+          # As the server interacts with the monitors through a queue on the MiddleMan, it's possible for the user
+          # the remove a task, but for us to still receive more data before the monitor is notified. As such, this
+          # call could potentially raise a NoSuchResourceError. In this case, just swallow the exception and log it.
           @logger.debug('MiddleMan Handler: Received a valid job report, enqueuing...')
-          redis.lpush("notgios.reports.#{id}", message.slice(2..-1).to_json)
+          begin
+            nodis.post_job_report(id, message.slice(2..-1).to_json)
+          rescue Nodis::NoSuchResourceError
+            @logger.debug('MiddleMan Handler: Task has been removed, but monitor hasn\'t been notified yet. Dumping report...')
+          end
         end
       end
 
@@ -164,7 +155,7 @@ module Notgios
       # Synchronization on monitor_handlers needs to be revisited in general.
       def start_monitor_handler(monitor)
         handler = Thread.new do
-          redis = monitor.redis
+          nodis = monitor.nodis
           socket = monitor.socket
           command_queue = monitor.queue
           keepalive_timer = Time.now
@@ -186,7 +177,7 @@ module Notgios
                     keepalive_timer = Time.now
                     break
                   elsif message.first.exists?
-                    handle_monitor_message(message, monitor, redis)
+                    handle_monitor_message(message, monitor, nodis)
                   else
                     # Monitor failed to send keepalive, continue under the assumption that it's dead.
                     @logger.error('MiddleMan Handler: Monitor failed to send keepalive, exiting...')
@@ -201,7 +192,7 @@ module Notgios
                 # fine with it.
                 send_command(socket, command_queue.pop) until command_queue.empty?
                 message = socket.read((10 - (Time.now - keepalive_timer)).abs)
-                handle_monitor_message(message, monitor, redis) unless message.empty?
+                handle_monitor_message(message, monitor, nodis) unless message.empty?
               end
             end
 
