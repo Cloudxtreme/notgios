@@ -1,7 +1,3 @@
-# FIXME: Set this up in a non-relative manner.
-require 'socket'
-require_relative '../helpers'
-
 module Notgios
   module Connection
 

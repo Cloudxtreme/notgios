@@ -2,6 +2,7 @@ require 'open3'
 
 module Notgios
   module SSH
+
     AuthenticationError = Class.new(StandardError)
 
     class Session

@@ -1,4 +1,8 @@
 require_relative 'middleman'
+require_relative 'socket'
+require 'thread'
+require 'redis'
+require 'json'
 require 'logger'
 require 'byebug'
 

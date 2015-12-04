@@ -1,9 +1,3 @@
-# FIXME: Set this up in non-relative manner.
-require_relative 'socket'
-require 'thread'
-require 'redis'
-require 'json'
-
 module Notgios
   module Connection
 
