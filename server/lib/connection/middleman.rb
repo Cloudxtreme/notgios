@@ -48,7 +48,7 @@ module Notgios
         tasks.each_pair { |monitor_address, commands| @connections[monitor_address] = MonitorStruct.new(nil, commands, Queue.new, nil, Redis.new(host: redis_host, port: redis_port)) }
 
         start_listening_thread
-        #start_supervisor_thread
+        start_supervisor_thread
       end
 
       # Function used by server to send a command to a monitor.
@@ -72,7 +72,7 @@ module Notgios
       # to make sure this can't happen.
       SUPERVISOR_SLEEP_PERIOD = KEEPALIVE_TIME / 2
 
-      def send_command(socket, cmd, tasks = nil)
+      def send_command(socket, cmd)
         valid = true
 
         # Send command to monitor.
@@ -87,7 +87,6 @@ module Notgios
             "METRIC #{cmd.metric}",
             "FREQ #{cmd.freq}"
           ].concat(cmd.options))
-          tasks.push(cmd) if tasks.exists?
         when :pause
           @logger.debug('MiddleMan Handler: Sending a pause command...')
           socket.write([
@@ -173,7 +172,6 @@ module Notgios
         handler = Thread.new do
           redis = monitor.redis
           socket = monitor.socket
-          tasks = monitor.tasks
           command_queue = monitor.queue
           keepalive_timer = Time.now
           begin
@@ -207,7 +205,7 @@ module Notgios
                 # block on the queue but still send keepalive messages, but its not, so I won't
                 # bother. As long as commands get sent within 10 seconds I'm sure people will be
                 # fine with it.
-                send_command(socket, command_queue.pop, tasks) until command_queue.empty?
+                send_command(socket, command_queue.pop) until command_queue.empty?
                 message = socket.read((10 - (Time.now - keepalive_timer)).abs)
                 handle_monitor_message(message, monitor, redis) unless message.empty?
               end
