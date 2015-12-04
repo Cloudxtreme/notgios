@@ -85,6 +85,8 @@ module Notgios
         else
           Array.new
         end
+      rescue Errno::ECONNRESET
+        raise SocketClosedError, 'Connection was reset while reading, please call close'
       end
 
       def peeraddr
@@ -92,7 +94,7 @@ module Notgios
       end
 
       def close
-        @socket.close
+        @socket.close if @socket.exists?
         @socket = nil
       rescue IOError
         nil

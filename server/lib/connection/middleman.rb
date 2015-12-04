@@ -83,10 +83,10 @@ module Notgios
           socket.write([
             "NGS JOB ADD",
             "ID #{cmd.id}",
-            "TYPE #{cmd.type.upcase}",
-            "METRIC #{cmd.metric.upcate}",
+            "TYPE #{cmd.type}",
+            "METRIC #{cmd.metric}",
             "FREQ #{cmd.freq}"
-          ].concat(cmd.options.map(&:upcase)))
+          ].concat(cmd.options))
           tasks.push(cmd) if tasks.exists?
         when :pause
           @logger.debug('MiddleMan Handler: Sending a pause command...')
@@ -156,8 +156,8 @@ module Notgios
           @error_queue.push(ErrorStruct.new(id, cause, severity))
         else
           # We have a valid report, push the results onto the appropriate Redis list.
-          @monitor.debug('MiddleMan Handler: Received a valid job report, enqueuing...')
-          redis.lpush("notgios.reports.#{id}", messages.slice(2..-1).to_json)
+          @logger.debug('MiddleMan Handler: Received a valid job report, enqueuing...')
+          redis.lpush("notgios.reports.#{id}", message.slice(2..-1).to_json)
         end
       end
 
@@ -222,6 +222,7 @@ module Notgios
           rescue SocketClosedError
             @logger.error('MiddleMan Handler: Encountered an error with the monitor socket, exiting...')
             socket.close
+            monitor.socket = nil
             @monitor_handlers.delete(monitor.address)
             @dead_handlers.push(handler)
           end
@@ -257,14 +258,14 @@ module Notgios
                     socket.close
                     @logger.debug('MiddleMan: Sent ACK to monitor, opening direct connection...')
 
-                    # Open a socket to the monitor's port. Not sure why this would fail, but give up if it does.
-                    socket = NotgiosSocket.new(host: ip_address, port: port, tries: 2) rescue next
+                    # Open a socket to the monitor's port.
+                    socket = NotgiosSocket.new(host: ip_address, port: port, tries: 2)
                     monitor.socket.close if monitor.socket.exists?
                     monitor.socket = socket
 
                     # Send the tasks.
-                    monitor.tasks { |task| monitor.queue.push(task) }
-                    @logger.debug('MiddleMan: Enqueued tasks to be sent to the monitor...')
+                    monitor.tasks.each { |task| monitor.queue.push(task) } unless message.first == 'NGS HELLO AGAIN'
+                    @logger.debug("MiddleMan: Enqueued #{monitor.tasks.size} tasks to be sent to the monitor...")
 
                     # Start communication thread.
                     start_monitor_handler(monitor)
@@ -274,11 +275,11 @@ module Notgios
                     socket.write('NGS NACK')
                     socket.close
                   end
-                rescue SocketClosedError
+                rescue SocketClosedError, ConnectionRefusedError
                   # We're in the initial handshake, so if the socket get closed at some point during that, just
                   # give up and start over. Doesn't matter if we accidentally call close twice.
                   @logger.error('MiddleMan: Ran into a socket error during handshake, moving on...')
-                  socket.close
+                  socket.close if socket.exists?
                   next
                 end
               else
