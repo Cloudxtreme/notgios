@@ -69,8 +69,8 @@ int handle_load_report(task_report_t *report, char *start, char *buffer);
 int handle_total_report(task_report_t *report, char *start, char *buffer);
 
 // Low Level Network Functions
-int create_server();
-int handshake(char *server_hostname, int port, int initial);
+int create_server(short port);
+int handshake(char *server_hostname, int port, int initial, short monitor_port);
 int handle_read(int fd, char *buffer, int len);
 int handle_write(int fd, char *buffer);
 
@@ -166,12 +166,33 @@ int main(int argc, char **argv) {
 
   // Outer infinite loop to allow for exceptional conditions, like the server going down.
   while (1) {
+    // Server will connect to us after we send over the port, so find one that works.
+    short monitor_port = NOTGIOS_MONITOR_PORT - 1;
+    int bound = 0;
+    while (!bound && monitor_port - NOTGIOS_MONITOR_PORT < 20) {
+      server_socket = create_server(++monitor_port);
+      if (server_socket != NOTGIOS_SOCKET_FAILURE) {
+        bound = 1;
+        break;
+      }
+    }
+    if (bound) {
+      write_log(LOG_DEBUG, "Monitor: Successfully opened a listening socket on port %hd...\n", monitor_port);
+    } else {
+      write_log(LOG_ERR, "Monitor: Failed to open a listening socket, exiting...\n");
+      user_error();
+      return EXIT_FAILURE;
+    }
+
     // Perform the handshake with the server and act accordingly.
-    switch (handshake(server_hostname, port, initial)) {
-      case 0:
+    switch (handshake(server_hostname, port, initial, monitor_port)) {
+      case NOTGIOS_SUCCESS:
         break;
       case NOTGIOS_SERVER_REJECTED:
+        write_log(LOG_ERR, "Monitor: Server sent back a rejection message...\n");
+        user_error();
       case NOTGIOS_BAD_HOSTNAME:
+        write_log(LOG_ERR, "Monitor: Server doesn't appear to exist? Bad hostname...\n");
         user_error();
       default:
         write_log(LOG_ERR, "Monitor: Initial handshake with server failed, exiting...\n");
@@ -179,12 +200,6 @@ int main(int argc, char **argv) {
     }
     initial = 0;
 
-    // The handshake was successful, configure the listening socket and wait on a connection.
-    if ((server_socket = create_server()) == NOTGIOS_SOCKET_FAILURE) {
-      user_error();
-      write_log(LOG_ERR, "Monitor: Failed to open listening socket, exiting...\n");
-      return EXIT_FAILURE;
-    }
     write_log(LOG_INFO, "Monitor: Initial handshake completed, waiting for server to connect...\n");
     struct timeval time;
     time.tv_sec = NOTGIOS_ACCEPT_TIMEOUT;
@@ -721,7 +736,7 @@ int handle_total_report(task_report_t *report, char *start, char *buffer) {
 // The first type happens during initial startup, and the other if the server goes down for
 // any reason. The first type assumes the server will send over all tasks for this host, and
 // the second does not.
-int handshake(char *server_hostname, int port, int initial) {
+int handshake(char *server_hostname, int port, int initial, short monitor_port) {
   int sockfd, sleep_period = 1;
   struct sockaddr_in serv_addr;
   struct hostent *server;
@@ -746,8 +761,8 @@ int handshake(char *server_hostname, int port, int initial) {
 
   // Send hello message to server.
   memset(buffer, 0, sizeof(char) * NOTGIOS_STATIC_BUFSIZE);
-  if (initial) sprintf(buffer, "NGS HELLO\nCMD PORT %d\n\n", NOTGIOS_MONITOR_PORT);
-  else sprintf(buffer, "NGS HELLO AGAIN\nCMD PORT %d\n\n", NOTGIOS_MONITOR_PORT);
+  if (initial) sprintf(buffer, "NGS HELLO\nCMD PORT %hd\n\n", monitor_port);
+  else sprintf(buffer, "NGS HELLO AGAIN\nCMD PORT %hd\n\n", monitor_port);
   handle_write(sockfd, buffer);
 
   // Get server's response.
@@ -836,7 +851,7 @@ int handle_write(int fd, char *buffer) {
 
 // Function opens a listening socket on NOTGIOS_MONITOR_PORT and marks it as
 // nonblocking.
-int create_server() {
+int create_server(short port) {
   int server_fd;
   struct sockaddr_in serv_addr;
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -845,7 +860,7 @@ int create_server() {
   memset(&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port = htons(NOTGIOS_MONITOR_PORT);
+  serv_addr.sin_port = htons(port);
   if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) return NOTGIOS_SOCKET_FAILURE;
   listen(server_fd, 10);
   return server_fd;
