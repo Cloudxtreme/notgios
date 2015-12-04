@@ -1,4 +1,4 @@
-var notgios = angular.module('notgios', ['ngRoute']);
+var notgios = angular.module('notgios', ['ngRoute', 'ngCookies']);
 
 notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider, $locationProvider) {
   $routeProvider.when('/', {
@@ -55,16 +55,38 @@ notgios.controller('navbarController', ['$scope', '$http', '$route', function ($
   };
 }]);
 
-notgios.controller('signupController', ['$scope', '$http', function ($scope, $http) {
+notgios.controller('signupController', ['$scope', '$http', '$cookieStore', function ($scope, $http, $cookieStore) {
 
   $scope.dropdown = 'Phone Number';
 
   $scope.setDropdown = function (value) {
     $scope.dropdown = value;
+    if (value == 'Phone Number') $scope.contactType = 'number';
+    else $scope.contactType = 'email';
   }
   
-  $scope.signUp = function () {
-
+  // I should have Angular do the form validation for me, but I don't have time to figure it out right now.
+  $scope.signUp = function ($event) {
+    if ($scope.username && $scope.username.length > 0 && $scope.password && $scope.password.length > 0) {
+      if ($scope.password == $scope.passConfirm && $scope.contact && $scope.contact.length > 0) {
+        $http({
+          method: 'POST',
+          url: '/sign_up'
+        }).then(function success(response) {
+          $scope.submissionError = '';
+          $cookieStore.put('token', response.data);
+        }, function failure(response) {
+          $event.stopPropagation();
+          $scope.submissionError = 'There was an error during submission. Please check your internet and try again.';
+        });
+      } else {
+        $event.stopPropagation();
+        $scope.submissionError = 'The form did not pass validation. Please check your entries and try again.'
+      }
+    } else {
+      $event.stopPropagation();
+      $scope.submissionError = 'The form did not pass validation. Please check your entries and try again.'
+    }
   };
 
 }]);

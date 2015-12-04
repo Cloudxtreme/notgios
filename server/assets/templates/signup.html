@@ -1,4 +1,4 @@
-<div class="modal fade signup-modal" tabindex="-1" role="dialog">
+<div ng-model="modal" class="modal fade signup-modal" tabindex="-1" role="dialog">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
@@ -6,17 +6,18 @@
       </div>
       <div class="modal-body">
         <h5>Please, tell us a little about yourself:</h5>
+        <!-- FIXME: Should add actual form validation here at some point. -->
         <div class="input-group below">
           <span class="input-group-addon" id="desired-user-addon">Desired Username</span>
-          <input ng-model="username" type="text" class="form-control" aria-describedby="desired-user-addon">
+          <input ng-model="username" type="text" class="form-control" aria-describedby="desired-user-addon" required>
         </div>
         <div class="input-group below">
           <span class="input-group-addon" id="desired-pass-addon">Desired Password&nbsp;</span>
-          <input ng-model="password" type="password" class="form-control" aria-descrbedby="desired-pass-addon">
+          <input ng-model="password" type="password" class="form-control" aria-descrbedby="desired-pass-addon" required>
         </div>
         <div class="input-group below">
           <span class="input-group-addon" id="desired-pass-confirm-addon">Confirm Password&nbsp;</span>
-          <input ng-model="passwordConfirm" type="text" class="form-control" aria-descrbedby="desired-pass-confirm-addon">
+          <input ng-model="passConfirm" type="password" class="form-control" aria-descrbedby="desired-pass-confirm-addon" required>
         </div>
         <br>
         <h5>Please provide at least one method of contact for alarms:</h5>
@@ -30,12 +31,14 @@
               <li><a ng-click="setDropdown('Email Address')" href="#">Email Address</a></li>
             </ul>
           </div>
-          <input ng-model="contact" type="text" class="form-control inline-input" aria-describedby="contact-addon">
+          <input ng-model="contact" type="text" class="form-control inline-input" aria-describedby="contact-addon" required>
         </div>
+        <br>
+        <p class="error-message">{{ submissionError }}</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
-        <button ng-click="signUp()" type="button" class="btn btn-primary">Sign Up</button>
+        <button ng-click="signUp($event)" type="submit" data-dismiss="modal" class="btn btn-primary">Sign Up</button>
       </div>
     </div>
   </div>

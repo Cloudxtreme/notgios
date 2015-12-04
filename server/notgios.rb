@@ -12,5 +12,9 @@ module Notgios
       erb :index
     end
 
+    post '/sign_up' do
+      'token'
+    end
+
   end
 end
