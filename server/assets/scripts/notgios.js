@@ -23,6 +23,14 @@ notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider,
   $locationProvider.html5Mode(true);
 }]);
 
+notgios.factory('authenticated', ['$cookies', function ($cookies) {
+  var authentication = {};
+  authentication.loggedIn = function () {
+    return $cookies.get('token') != null;
+  };
+  return authentication;
+}]);
+
 notgios.controller('homeController', ['$scope', '$http', function ($scope, $http) {
 
 }]);
@@ -43,9 +51,9 @@ notgios.controller('contactController', ['$scope', '$http', function ($scope, $h
 
 }]);
 
-notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies', function ($scope, $http, $route, $cookies) {
+notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies', 'authenticated', function ($scope, $http, $route, $cookies, authenticated) {
 
-  $scope.loggedIn = $cookies.get('token') != null;
+  $scope.loggedIn = authenticated.loggedIn;
 
   $scope.isActive = function (path) {
     if ($route.current && $route.current.regexp) return $route.current.regexp.test(path);
@@ -65,7 +73,6 @@ notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies',
       }).then(function success(response) {
         $scope.submissionError = '';
         $cookies.put('token', response.data)
-        $scope.loggedIn = true;
       }, function failure(response) {
         if (response.status == 400) $scope.loginError = 'User does not exist.'
         else $scope.loginError = 'Password is incorrect';
@@ -77,14 +84,15 @@ notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies',
 
   $scope.logout = function () {
     $cookies.remove('token');
-    $scope.loggedIn = false;
   };
 
 }]);
 
-notgios.controller('signupController', ['$scope', '$http', '$cookies', function ($scope, $http, $cookies) {
+notgios.controller('signupController', ['$scope', '$http', '$cookies', 'authenticated', function ($scope, $http, $cookies, authenticated) {
 
   $scope.dropdown = 'Phone Number';
+
+  $scope.loggedIn = authenticated.loggedIn;
 
   $scope.setDropdown = function (value) {
     $scope.dropdown = value;
