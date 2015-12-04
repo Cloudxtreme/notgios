@@ -430,6 +430,9 @@ void handle_add(char **commands, char *reply_buf) {
   else if (!strcmp(metric_str, "NONE")) metric = NONE;
   else RETURN_NACK(reply_buf, "UNRECOGNIZED_METRIC");
 
+  // This shouldn't happen, but would mean that the server sent us a duplicate ID.
+  if (hash_get(&threads, id) != NULL) RETURN_NACK(reply_buf, "DUPLICATE_ID");
+
   // Get information ready to pass onto the thread.
   thread_args_t *arguments = calloc(1, sizeof(thread_args_t));
   strcpy(arguments->id, id);
@@ -521,9 +524,6 @@ void handle_add(char **commands, char *reply_buf) {
   if (retvals[0] == HASH_FROZEN || retvals[1] == HASH_FROZEN) {
     // This can only happen if we've received a SIGTERM.
     RETURN_NACK(reply_buf, "SHUTDOWN");
-  } else if (retvals[0] == HASH_EXISTS || retvals[1] == HASH_EXISTS) {
-    // This shouldn't happen, but would mean that the server sent us a duplicate ID.
-    RETURN_NACK(reply_buf, "DUPLICATE_ID");
   }
   // Write acknowledgement.
   RETURN_ACK(reply_buf);
