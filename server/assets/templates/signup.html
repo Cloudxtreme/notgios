@@ -1,0 +1,42 @@
+<div class="modal fade signup-modal" tabindex="-1" role="dialog">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Notgios Sign-up</h2>
+      </div>
+      <div class="modal-body">
+        <h5>Please, tell us a little about yourself:</h5>
+        <div class="input-group below">
+          <span class="input-group-addon" id="desired-user-addon">Desired Username</span>
+          <input ng-model="username" type="text" class="form-control" aria-describedby="desired-user-addon">
+        </div>
+        <div class="input-group below">
+          <span class="input-group-addon" id="desired-pass-addon">Desired Password&nbsp;</span>
+          <input ng-model="password" type="password" class="form-control" aria-descrbedby="desired-pass-addon">
+        </div>
+        <div class="input-group below">
+          <span class="input-group-addon" id="desired-pass-confirm-addon">Confirm Password&nbsp;</span>
+          <input ng-model="passwordConfirm" type="text" class="form-control" aria-descrbedby="desired-pass-confirm-addon">
+        </div>
+        <br>
+        <h5>Please provide at least one method of contact for alarms:</h5>
+        <div class="row-fluid">
+          <div class="btn-group">
+            <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+              {{ dropdown }} <span class="caret"></span>
+            </button>
+            <ul class="dropdown-menu">
+              <li><a ng-click="setDropdown('Phone Number ')" href="#">Phone Number</a></li>
+              <li><a ng-click="setDropdown('Email Address')" href="#">Email Address</a></li>
+            </ul>
+          </div>
+          <input ng-model="contact" type="text" class="form-control inline-input" aria-describedby="contact-addon">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+        <button ng-click="signUp()" type="button" class="btn btn-primary">Sign Up</button>
+      </div>
+    </div>
+  </div>
+</div>

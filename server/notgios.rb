@@ -8,7 +8,7 @@ module Notgios
     set :bind, '0.0.0.0'
 
     # Base route.
-    get '/' do
+    get(/\/|\/servers|\/tasks|\/alarms|\/contacts/) do
       erb :index
     end
 

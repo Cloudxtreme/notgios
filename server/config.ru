@@ -1,23 +1,23 @@
 $ROOT = File.expand_path(File.dirname(__FILE__))
 $:.unshift $ROOT
 
-require 'sinatra'
+# System Requirements
 require 'yaml'
-require 'puma'
-require 'redis'
-require 'jwt'
 require 'json'
 require 'thread'
 require 'logger'
 require 'socket'
 require 'digest'
 require 'securerandom'
-require 'lib/helpers'
-require 'lib/ssh_session'
-require 'lib/connection/socket'
-require 'lib/connection/middleman'
-require 'notgios'
 
+# Gem Requirements
+require 'sinatra'
+require 'puma'
+require 'redis'
+require 'jwt'
+require 'tilt/erb'
+
+# Constant Declaration/Setup
 module Notgios
 
   CONFIG = YAML::load_file(File.join($ROOT, 'config', 'notgios.yml'))
@@ -46,5 +46,12 @@ module Notgios
   AlarmStruct = Struct.new(:id, :threshold, :priority, :predictive)
 
 end
+
+# Local Requirements
+require 'lib/helpers'
+require 'lib/ssh_session'
+require 'lib/connection/socket'
+require 'lib/connection/middleman'
+require 'notgios'
 
 run Notgios::Server

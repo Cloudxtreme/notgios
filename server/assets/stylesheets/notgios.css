@@ -1,0 +1,25 @@
+body {
+  background-image: url("/images/squares.png");
+}
+
+div.input-group.below {
+  margin-top: 15px;
+}
+
+ul.dropdown-menu.wide {
+  width: 400%;
+}
+
+button.btn.btn-primary.inline-left {
+  width: 48%;
+}
+
+button.btn.btn-default.inline-right {
+  width: 50%;
+}
+
+input.form-control.inline-input {
+  width: 50%;
+  margin-left: 10px;
+  display: inline-block;
+}
