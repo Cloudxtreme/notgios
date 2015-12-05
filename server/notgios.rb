@@ -7,28 +7,41 @@ module Notgios
     set :public_folder, File.join($ROOT, 'assets')
     set :bind, '0.0.0.0'
 
+    # Enforce Authentication before handling routes.
+    before do
+      # Exclude the login and sign up routes.
+      pass if %w{ sign_in sign_up }.include?(request.path_info.split('/')[1])
+
+      authorization = headers 'Authorization'
+      begin
+        token = authorization.split(' ')[1]
+        if token.exists?
+          decoded = AuthToken.decode(token)
+          halt 401 unless decoded.exists?
+          params['username'] = decoded['username']
+        else
+          halt 401
+        end
+      rescue
+        # Any kind of exception would mean authentication failed.
+        halt 401
+      end
+    end
+
     # Base route.
     get %r{^/(tasks|alarms|contacts)?$} do
       erb :index
     end
 
     get '/get_servers/?:server?' do
-      {
-        connectedServers: [
-          {
-            name: 'Stream',
-            address: '104.236.124.232',
-            lastSeen: 1449282827
-          }
-        ],
-        disconnectedServers: [
-          {
-            name: 'Monitored',
-            address: '159.203.119.88',
-            lastSeen: 1449282827
-          }
-        ]
-      }.to_json
+      Helpers.with_nodis do |nodis|
+        connected, disconnected = Array.new, Array.new
+        nodis.get_servers(params['username']).each { |server| server.connected.to_b ? connected.push(server) : disconnected.push(server) }
+        {
+          connectedServers: connected,
+          disconnectedServers: disconnected
+        }.to_json
+      end
     end
 
     get '/get_tasks/?:task?' do
@@ -83,6 +96,8 @@ module Notgios
     end
 
     post '/sign_up' do
+      halt 400 unless params[:username].exists? && params[:password].exists?
+
       Helpers.with_nodis do |nodis|
         begin
           nodis.add_user(params[:username], params[:password])
@@ -94,6 +109,8 @@ module Notgios
     end
 
     post '/sign_in' do
+      halt 400 unless params[:username].exists? && params[:password].exists?
+
       Helpers.with_nodis do |nodis|
         begin
           if nodis.authenticate_user(params[:username], params[:password])

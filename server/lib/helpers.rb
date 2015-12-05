@@ -10,6 +10,24 @@ class NilClass
   end
 end
 
+class TrueClass
+  def to_b
+    true
+  end
+end
+
+class FalseClass
+  def to_b
+    false
+  end
+end
+
+class String
+  def to_b
+    downcase == 'true'
+  end
+end
+
 module Notgios
   module Helpers
 
