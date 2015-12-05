@@ -18,11 +18,11 @@
         <th>{{ server.name }}</th>
         <th>{{ server.address }}</th>
         <th>{{ server.lastSeen.toString() }}</th>
-        <th><a ng-click="$parent.showServer(server)" href="#">Details</a></th>
+        <th><a data-target="#server-modal" data-toggle="modal" ng-click="$parent.showServer(server)" href="#">Details</a></th>
       </tr>
       <tr ng-if="status == 'success'">
         <th></th>
-        <th><a ng-click="addServer()" href="#">Add Server</a></th>
+        <th><a data-target="#server-modal" data-toggle="modal" ng-click="$parent.showServer(server)" href="#">Add Server</a></th>
         <th></th>
         <th></th>
         <th></th>

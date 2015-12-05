@@ -2,7 +2,7 @@ body {
   background-image: url("/images/squares.png");
 }
 
-div.input-group.below {
+.below {
   margin-top: 15px;
 }
 

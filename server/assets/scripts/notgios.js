@@ -86,7 +86,7 @@ notgios.controller('homeController', ['$scope', '$http', '$interval', 'authentic
   });
 
   $scope.showServer = function (server) {
-    alert('server');
+    $scope.shownServer = server;
   };
 
 }]);

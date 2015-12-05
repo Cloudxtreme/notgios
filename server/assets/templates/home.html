@@ -31,6 +31,32 @@
       header="'Disconnected Servers'">
       </server-table>
     </div>
+
+    <!-- Server Configuration Modal -->
+    <div class="modal fade" id="server-modal" tabindex="-1" role="dialog">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4 class="modal-title">{{ shownServer.name || "New Server" }}</h4>
+          </div>
+          <div class="modal-body">
+            <div class="input-group">
+              <span class="input-group-addon" id="server-name-addon">Server Name&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+              <input type="text" class="form-control" value="{{ shownServer.name }}">
+            </div>
+            <div class="input-group below">
+              <span class="input-group-addon" id="address-addon">Server IP Address</span>
+              <input type="text" class="form-control" value="{{ shownServer.address }}" ng-disabled="shownServer">
+            </div>
+            <button type="button" class="btn btn-danger below" ng-if="shownServer" ng-click="deleteServer(shownServer)">Delete</button>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-default" type="button" data-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" type="submit" data-dismiss="modal">{{ shownServer && "Update" || "Save" }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   <div ng-if="!loggedIn()" class="container-fluid">
     <div class="jumbotron">
