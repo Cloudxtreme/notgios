@@ -4,9 +4,6 @@ notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider,
   $routeProvider.when('/', {
     templateUrl: '/templates/home.html',
     controller: 'homeController'
-  }).when('/servers', {
-    templateUrl: '/templates/servers.html',
-    controller: 'serverController'
   }).when('/tasks', {
     templateUrl: '/templates/tasks.html',
     controller: 'taskController'
@@ -23,23 +20,78 @@ notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider,
   $locationProvider.html5Mode(true);
 }]);
 
-notgios.factory('authenticated', ['$cookies', function ($cookies) {
+notgios.factory('authenticated', ['$cookies', '$http', function ($cookies, $http) {
   var authentication = {};
+
   authentication.loggedIn = function () {
     return $cookies.get('token') != null;
   };
+
+  authentication.getData = function (url, success, failure) {
+    $http({
+      method: 'GET',
+      url: url,
+      headers: {
+        'Authorization': 'Bearer ' + $cookies.get('token')
+      }
+    }).then(success, failure);
+  };
+
+  authentication.sendData = function (url, data, success, failure) {
+    $http({
+      method: 'POST',
+      url: url,
+      headers: {
+        'Authorization': 'Bearer ' + $cookies.get('token')
+      }
+    }).then(success, failure);
+  };
+
+  authentication.logIn = function (token) {
+    if (token) {
+      $cookies.put('token', token);
+    }
+  };
+
+  authentication.logOut = function () {
+    $cookies.remove('token');
+  };
+  
   return authentication;
 }]);
 
-notgios.controller('homeController', ['$scope', '$http', function ($scope, $http) {
+notgios.controller('homeController', ['$scope', '$http', '$interval', 'authenticated', function ($scope, $http, $interval, authenticated) {
+
+  $scope.loggedIn = authenticated.loggedIn;
+  $scope.serverData = {};
+
+  $scope.dataInterval = $interval(function dataInterval() {
+    authenticated.getData('servers', function success(response) {
+      for (var i = 0; i < response.data.connectedServers.length; i++) {
+        server = response.data.connectedServers[i];
+        server.lastSeen = new Date(server.lastSeen);
+      }
+      for (var i = 0; i < response.data.disconnectedServers.length; i++) {
+        server = response.data.disconnectedServers[i];
+        server.lastSeen = new Date(server.lastSeen);
+      }
+      $scope.serverData = response.data;
+    }, function failure(response) {
+      $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
+    });
+  }, 1000);
+
+  $scope.$on('$destroy', function destruct() {
+    $interval.cancel($scope.dataInterval);
+  });
+
+  $scope.showServer = function (server) {
+    alert('server');
+  };
 
 }]);
 
-notgios.controller('serverController', ['$scope', '$http', function ($scope, $http) {
-
-}]);
-
-notgios.controller('taskController', ['$scope', '$http', function ($scope, $http) {
+notgios.controller('taskController', ['$scope', '$http', function  ($scope, $http) {
 
 }]);
 
@@ -51,7 +103,7 @@ notgios.controller('contactController', ['$scope', '$http', function ($scope, $h
 
 }]);
 
-notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies', 'authenticated', function ($scope, $http, $route, $cookies, authenticated) {
+notgios.controller('navbarController', ['$scope', '$http', '$route', 'authenticated', function ($scope, $http, $route, authenticated) {
 
   $scope.loggedIn = authenticated.loggedIn;
 
@@ -72,7 +124,7 @@ notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies',
         }
       }).then(function success(response) {
         $scope.submissionError = '';
-        $cookies.put('token', response.data)
+        authenticated.logIn(response.data);
       }, function failure(response) {
         if (response.status == 400) $scope.loginError = 'User does not exist.'
         else $scope.loginError = 'Password is incorrect';
@@ -83,12 +135,12 @@ notgios.controller('navbarController', ['$scope', '$http', '$route', '$cookies',
   };
 
   $scope.logout = function () {
-    $cookies.remove('token');
+    authenticated.logOut();
   };
 
 }]);
 
-notgios.controller('signupController', ['$scope', '$http', '$cookies', 'authenticated', function ($scope, $http, $cookies, authenticated) {
+notgios.controller('signupController', ['$scope', '$http', 'authenticated', function ($scope, $http, authenticated) {
 
   $scope.dropdown = 'Phone Number';
 
@@ -114,7 +166,7 @@ notgios.controller('signupController', ['$scope', '$http', '$cookies', 'authenti
           }
         }).then(function success(response) {
           $scope.submissionError = '';
-          $cookies.put('token', response.data);
+          authenticated.logIn(response.data);
         }, function failure(response) {
           $event.stopPropagation();
           if (response.status == 400) $scope.submissionError = 'A user with that name already exists. Please pick another';
@@ -132,16 +184,15 @@ notgios.controller('signupController', ['$scope', '$http', '$cookies', 'authenti
 
 }]);
 
-notgios.directive('ngsNavbar', function () {
+notgios.directive('serverTable', function () {
   return {
-    templateUrl: '/templates/navbar.html',
-    replace: true
-  };
-});
-
-notgios.directive('ngsSignup', function () {
-  return {
-    templateUrl: '/templates/signup.html',
-    replace: true
+    templateUrl: '/templates/server_table.html',
+    replace: true,
+    scope: {
+      servers: "=servers",
+      status: "=connected",
+      showServer: "=callback",
+      title: "=header"
+    }
   };
 });

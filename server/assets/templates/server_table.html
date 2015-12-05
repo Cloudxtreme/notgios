@@ -1,0 +1,32 @@
+<div ng-class="{ 'panel-success': status == 'success', 'panel-danger': status == 'danger'}" class="panel">
+  <div class="panel-heading">
+    <h3 class="panel-title">{{ title }}</h3>
+  </div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Name</th>
+        <th>Address</th>
+        <th>Last Contact</th>
+        <th>Config</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr ng-repeat="server in servers">
+        <th>{{ $index + 1 }}</th>
+        <th>{{ server.name }}</th>
+        <th>{{ server.address }}</th>
+        <th>{{ server.lastSeen.toString() }}</th>
+        <th><a ng-click="$parent.showServer(server)" href="#">Details</a></th>
+      </tr>
+      <tr ng-if="status == 'success'">
+        <th></th>
+        <th><a ng-click="addServer()" href="#">Add Server</a></th>
+        <th></th>
+        <th></th>
+        <th></th>
+      </tr>
+    </tbody>
+  </table>
+</div>

@@ -8,8 +8,27 @@ module Notgios
     set :bind, '0.0.0.0'
 
     # Base route.
-    get(/\/|\/servers|\/tasks|\/alarms|\/contacts/) do
+    get %r{^/(tasks|alarms|contacts)?$} do
       erb :index
+    end
+
+    get '/servers/?:server?' do
+      {
+        connectedServers: [
+          {
+            name: 'Stream',
+            address: '104.236.124.232',
+            lastSeen: 1449282827
+          }
+        ],
+        disconnectedServers: [
+          {
+            name: 'Monitored',
+            address: '159.203.119.88',
+            lastSeen: 1449282827
+          }
+        ]
+      }.to_json
     end
 
     post '/sign_up' do

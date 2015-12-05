@@ -1,1 +1,53 @@
-<h1>And this is the home page!</h1>
+<div ng-controller="homeController">
+  <div ng-if="loggedIn()" class="container-fluid">
+    <div ng-if="serverData.connectedServers == undefined || serverData.connectedServers.length == 0">
+      <div class="panel panel-primary">
+        <div class="panel-heading">
+          <h3 class="panel-title">Servers</h3>
+        </div>
+        <div class="panel-body">
+          <div ng-if="$parent.serverData.connectedServers == undefined">
+            <p>Servers are being loaded...</p>
+          </div>
+          <div ng-if="$parent.serverData.connectedServers.length == 0">
+            <p>You don't have any servers! Trying adding one!</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div ng-if="serverData.connectedServers.length > 0 ">
+      <server-table
+      servers="$parent.serverData.connectedServers"
+      connected="'success'"
+      callback="$parent.showServer"
+      header="'Connected Servers'">
+      </server-table>
+    </div>
+    <div ng-if="serverData.disconnectedServers.length > 0">
+      <server-table
+      servers="$parent.serverData.disconnectedServers"
+      connected="'danger'"
+      callback="$parent.showServer"
+      header="'Disconnected Servers'">
+      </server-table>
+    </div>
+  </div>
+  <div ng-if="!loggedIn()" class="container-fluid">
+    <div class="jumbotron">
+      <h1>Here are where your servers would be!</h1>
+      <p>Notgios offers (or will at some point) near zero configuration of Linux based cloud servers, and offers the following services:</p>
+      <ul>
+        <li class="advertising">Monit-like supervision of processes.</li>
+        <li class="advertising">Collection of process metrics (CPU, memory, IO usage).</li>
+        <li class="advertising">Collection of disk (total and per directory) usage metrics.</li>
+        <li class="advertising">Collection of general system metrics (load average, total CPU, total IO).</li>
+        <li class="advertising">Easy visualization of said metrics.</li>
+        <li class="advertising">Traditional alarm functionality (text messages, emails) based on metric thresholds.</li>
+        <li class="advertising">Predictive alarm functionality based on configurable trends.</li>
+      </ul>
+      <!-- TODO: Put some sort of preview or something here for what the screen would look like if you were logged in and had servers. -->
+      <br>
+      <p>So what are you waiting for? Sign up!</p>
+    </div>
+  </div>
+</div>

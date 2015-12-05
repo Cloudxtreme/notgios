@@ -13,8 +13,101 @@
     <link rel="stylesheet" href="/stylesheets/notgios.css">
   </head>
   <body>
-    <ngs-navbar ng-controller="navbarController"></ngs-navbar>
-    <ngs-signup ng-controller="signupController"></ngs-signup>
+    <!-- Navbar -->
+    <nav ng-controller="navbarController" class="navbar navbar-inverse navbar-static-top">
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <a class="navbar-brand">Notgios</a>
+        </div>
+        <div class="collapse navbar-collapse">
+          <ul class="nav navbar-nav">
+            <li ng-class="{ active: isActive('/') }"><a href="/">Home</a></li>
+            <li ng-class="{ active: isActive('/tasks') }"><a href="/tasks">Tasks</a></li>
+            <li ng-class="{ active: isActive('/alarms') }"><a href="/alarms">Alarms</a></li>
+            <li ng-class="{ active: isActive('/contacts') }"><a href="/contacts">Contact Info</a></li>
+          </ul>
+          <ul ng-if="!loggedIn()" class="nav navbar-nav navbar-right">
+            <li class="dropdown">
+              <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">Login <span class="caret"></span></a></span>
+              <ul class="dropdown-menu wide">
+                <li>
+                  <div class="container-fluid">
+                    <h4>Please Enter Your Credentials</h4>
+                    <form>
+                      <div class="input-group">
+                        <span class="input-group-addon" id="username-addon">Username</span>
+                        <input ng-model="$parent.user" type="text" class="form-control" placeholder="timielinksi" aria-describedby="username-addon">
+                      </div>
+                      <div class="input-group below">
+                        <span class="input-group-addon" id="password-addon">Password&nbsp;</span>
+                        <input ng-model="$parent.pass" type="password" class="form-control" placeholder="********" aria-describedby="password-addon">
+                      </div>
+                      <p class="error-message">{{ loginError }}</p>
+                      <div class="row-fluid">
+                        <button ng-click="login($event)" tyle="submit" class="btn btn-primary inline-left">Login</button>
+                        <button class="btn btn-default inline-right" data-toggle="modal" data-target=".signup-modal">Create Account</button>
+                      </div>
+                      <br>
+                    </form>
+                  </div>
+                </li>
+              </ul>
+            </li>
+          </ul>
+          <!-- Duplicating the UL is actually necessary -->
+          <ul ng-if="loggedIn()" class="nav navbar-nav navbar-right">
+            <li ng-click="logout()"><a href="#">Log out</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Login/Signup Dropdown -->
+    <div ng-controller="signupController" ng-model="modal" class="modal fade signup-modal" tabindex="-1" role="dialog">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Notgios Sign-up</h2>
+          </div>
+          <div class="modal-body">
+            <h5>Please, tell us a little about yourself:</h5>
+            <!-- FIXME: Should add actual form validation here at some point. -->
+            <div class="input-group below">
+              <span class="input-group-addon" id="desired-user-addon">Desired Username</span>
+              <input ng-model="username" type="text" class="form-control" aria-describedby="desired-user-addon" required>
+            </div>
+            <div class="input-group below">
+              <span class="input-group-addon" id="desired-pass-addon">Desired Password&nbsp;</span>
+              <input ng-model="password" type="password" class="form-control" aria-descrbedby="desired-pass-addon" required>
+            </div>
+            <div class="input-group below">
+              <span class="input-group-addon" id="desired-pass-confirm-addon">Confirm Password&nbsp;</span>
+              <input ng-model="passConfirm" type="password" class="form-control" aria-descrbedby="desired-pass-confirm-addon" required>
+            </div>
+            <br>
+            <h5>Please provide at least one method of contact for alarms:</h5>
+            <div class="row-fluid">
+              <div class="btn-group">
+                <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                  {{ dropdown }} <span class="caret"></span>
+                </button>
+                <ul class="dropdown-menu">
+                  <li><a ng-click="setDropdown('Phone Number ')" href="#">Phone Number</a></li>
+                  <li><a ng-click="setDropdown('Email Address')" href="#">Email Address</a></li>
+                </ul>
+              </div>
+              <input ng-model="contact" type="text" class="form-control inline-input" aria-describedby="contact-addon" required>
+            </div>
+            <br>
+            <p class="error-message">{{ submissionError }}</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+            <button ng-click="signUp($event)" type="submit" data-dismiss="modal" class="btn btn-primary">Sign Up</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div ng-view></div>
   </body>
 </html>
