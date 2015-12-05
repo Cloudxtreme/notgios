@@ -94,7 +94,6 @@ notgios.controller('homeController', ['$scope', '$interval', 'authenticated', fu
 notgios.controller('taskController', ['$scope', '$interval', 'authenticated', function  ($scope, $interval, authenticated) {
 
   $scope.loggedIn = authenticated.loggedIn;
-  $scope.taskData = null;
   $scope.metrics = [];
 
   $scope.dataInterval = $interval(function dataInterval() {

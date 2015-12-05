@@ -1,6 +1,6 @@
 <div ng-controller="taskController">
   <div ng-if="loggedIn()" class="container-fluid">
-    <div class="panel panel-primary" ng-if="!taskData">
+    <div class="panel panel-primary" ng-if="taskData == undefined">
       <div class="panel-heading">
         <h3 class="panel-title">Loading...</h3>
       </div>
@@ -13,7 +13,7 @@
         <h3 class="panel-title">A Cool Server Name</h3>
       </div>
       <div class="panel-body">
-        <p>You don't have any tasks defined for any servers! Get on that, man!</p>
+        <p>You don't have any servers defined! You'll need to add at least one before adding any tasks.</p>
       </div>
     </div>
     <task-table
@@ -30,7 +30,7 @@
           </div>
           <div class="modal-body">
             <div id="highcharts">
-
+              
             </div>
           </div>
         </div>
