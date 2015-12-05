@@ -1,4 +1,5 @@
 *.swp
+*.rdb
 *.o
 *.DS_Store
 *.byebug_history
