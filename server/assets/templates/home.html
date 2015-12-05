@@ -10,25 +10,25 @@
             <p>Servers are being loaded...</p>
           </div>
           <div ng-if="$parent.serverData.connectedServers.length == 0">
-            <p>You don't have any servers! Trying adding one!</p>
+            <p>You don't have any servers! Try adding one!</p>
           </div>
         </div>
       </div>
     </div>
     <div ng-if="serverData.connectedServers.length > 0 ">
       <server-table
-      servers="$parent.serverData.connectedServers"
-      connected="'success'"
-      callback="$parent.showServer"
-      header="'Connected Servers'">
+        servers="$parent.serverData.connectedServers"
+        connected="'success'"
+        callback="$parent.showServer"
+        header="'Connected Servers'">
       </server-table>
     </div>
     <div ng-if="serverData.disconnectedServers.length > 0">
       <server-table
-      servers="$parent.serverData.disconnectedServers"
-      connected="'danger'"
-      callback="$parent.showServer"
-      header="'Disconnected Servers'">
+        servers="$parent.serverData.disconnectedServers"
+        connected="'danger'"
+        callback="$parent.showServer"
+        header="'Disconnected Servers'">
       </server-table>
     </div>
 

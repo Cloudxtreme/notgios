@@ -89,6 +89,17 @@ module Notgios
       raise InvalidJobError, "Job #{id} exists but is malformatted"
     end
 
+    # Expects:
+    # username - String
+    def get_jobs_for_user(username)
+      raise NoSuchResourceError unless exists("notgios.users.#{username}")
+      jobs = Array.new
+      smembers("notgios.users.#{username}.jobs").each do |job|
+        jobs.push(hgetall("notgios.jobs.#{job}"))
+      end
+      jobs
+    end
+
     # Only to be used during startup.
     def get_all_jobs
       jobs = Hash.new { |h, k| h[k] = Array.new }

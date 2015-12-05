@@ -60,13 +60,13 @@ notgios.factory('authenticated', ['$cookies', '$http', function ($cookies, $http
   return authentication;
 }]);
 
-notgios.controller('homeController', ['$scope', '$http', '$interval', 'authenticated', function ($scope, $http, $interval, authenticated) {
+notgios.controller('homeController', ['$scope', '$interval', 'authenticated', function ($scope, $interval, authenticated) {
 
   $scope.loggedIn = authenticated.loggedIn;
   $scope.serverData = {};
 
   $scope.dataInterval = $interval(function dataInterval() {
-    authenticated.getData('servers', function success(response) {
+    authenticated.getData('get_servers', function success(response) {
       for (var i = 0; i < response.data.connectedServers.length; i++) {
         server = response.data.connectedServers[i];
         server.lastSeen = new Date(server.lastSeen);
@@ -91,7 +91,40 @@ notgios.controller('homeController', ['$scope', '$http', '$interval', 'authentic
 
 }]);
 
-notgios.controller('taskController', ['$scope', '$http', function  ($scope, $http) {
+notgios.controller('taskController', ['$scope', '$interval', 'authenticated', function  ($scope, $interval, authenticated) {
+
+  $scope.loggedIn = authenticated.loggedIn;
+  $scope.taskData = null;
+  $scope.metrics = [];
+
+  $scope.dataInterval = $interval(function dataInterval() {
+    authenticated.getData('get_tasks', function success(response) {
+      $scope.taskData = response.data;
+    }, function failure(response) {
+      $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
+    });
+
+    if ($scope.taskData && $scope.taskData.length > 0) {
+      for (var i = 0; i < $scope.taskData.length; i++) {
+        (function (num) {
+          authenticated.getData('get_metrics/' + num, function success(response) {
+            $scope.metrics[num] = response.data;
+          }, function failure(response) {
+            $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
+          });
+        })(i);
+      }
+    }
+  }, 1000);
+
+  $scope.$on('$destroy', function destruct() {
+    $interval.cancel($scope.dataInterval);
+  });
+
+  $scope.showVis = function (task) {
+    $scope.shownVis = task;
+    $('#highcharts').highcharts();
+  };
 
 }]);
 
@@ -193,6 +226,17 @@ notgios.directive('serverTable', function () {
       status: "=connected",
       showServer: "=callback",
       title: "=header"
+    }
+  };
+});
+
+notgios.directive('taskTable', function () {
+  return {
+    templateUrl: '/templates/task_table.html',
+    replace: true,
+    scope: {
+      taskData: "=tasks",
+      showVis: "=callback"
     }
   };
 });

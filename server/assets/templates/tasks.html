@@ -1,1 +1,48 @@
-<h1>And this is the one with the tasks!</h1>
+<div ng-controller="taskController">
+  <div ng-if="loggedIn()" class="container-fluid">
+    <div class="panel panel-primary" ng-if="!taskData">
+      <div class="panel-heading">
+        <h3 class="panel-title">Loading...</h3>
+      </div>
+      <div class="panel-body">
+        <p>Tasks are being loaded...</p>
+      </div>
+    </div>
+    <div class="panel panel-primary" ng-if="taskData.length == 0">
+      <div class="panel-heading">
+        <h3 class="panel-title">A Cool Server Name</h3>
+      </div>
+      <div class="panel-body">
+        <p>You don't have any tasks defined for any servers! Get on that, man!</p>
+      </div>
+    </div>
+    <task-table
+      tasks="taskData"
+      ng-if="taskData.length > 0">
+    </task-table>
+
+    <!-- Task Visualization Modal -->
+    <div class="modal fade" id="vis-modal" tabindex="-1" role="dialog">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4>Task {{ shownVis.id }} Graph</h4>
+          </div>
+          <div class="modal-body">
+            <div id="highcharts">
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Task Configuration Modal -->
+    <div class="modal fade" id="config-modal" tabindex="-1" role="dialog">
+
+    </div>
+  </div>
+  <div ng-if="!loggedIn()" class="container-fluid">
+
+  </div>
+</div>

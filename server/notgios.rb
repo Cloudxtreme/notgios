@@ -12,7 +12,7 @@ module Notgios
       erb :index
     end
 
-    get '/servers/?:server?' do
+    get '/get_servers/?:server?' do
       {
         connectedServers: [
           {
@@ -29,6 +29,57 @@ module Notgios
           }
         ]
       }.to_json
+    end
+
+    get '/get_tasks/?:task?' do
+      [
+        {
+          name: 'Stream',
+          address: '104.236.124.232',
+          tasks: [
+            {
+              id: 5,
+              type: 'process',
+              metric: 'cpu',
+              freq: 5,
+              options: {
+                keepalive: true,
+                pidfile: '/root/working/a.pid',
+                runcmd: '/root/working/a.out'
+              }
+            },
+            {
+              id: 6,
+              type: 'process',
+              metric: 'memory',
+              freq: 600,
+              options: {
+                keepalive: false,
+                pidfile: '/root/working/stuff.pid',
+                runcmd: '/root/working/stuff'
+              }
+            }
+          ]
+        },
+        {
+          name: 'Monitored',
+          address: '159.203.119.88',
+          tasks: [
+            {
+              id: 7,
+              type: 'directory',
+              freq: 3600,
+              options: {
+                path: '/root/git'
+              }
+            }
+          ]
+        }
+      ].to_json
+    end
+
+    get '/get_metrics/:task_id' do
+
     end
 
     post '/sign_up' do

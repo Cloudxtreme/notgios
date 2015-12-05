@@ -1,0 +1,30 @@
+<div class="panel panel-primary" ng-repeat="server in taskData">
+  <div class="panel-heading">
+    <h3 class="panel-title">{{ server.name }}</h3>
+  </div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Type</th>
+        <th>Metric</th>
+        <th>Frequency</th>
+        <th>Task Specific</th>
+        <th>Graphs</th>
+        <th>Config</th>
+      </tr>
+    </thread>
+    <tbody>
+      <tr ng-repeat="task in server.tasks">
+        <th>{{ task.id }}</th>
+        <th>{{ task.type }}</th>
+        <th>{{ task.metric || "N/A" }}</th>
+        <th>{{ task.freq }} seconds</th>
+        <th ng-if="task.type == 'process'">{{ task.options['runcmd'] }}</th>
+        <th ng-if="task.type == 'directory'">{{ task.options['path'] }}</th>
+        <th><a data-target="#vis-modal" data-toggle="modal" ng-click="$parent.showVis(task)">View Graphs</a></th>
+        <th><a data-target="#config-modal" data-toggle="modal" ng-click="$parent.showConfig(task, server)">Details</a></th>
+      </tr>
+    </tbody>
+  </table>
+</div>
