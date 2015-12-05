@@ -44,51 +44,30 @@ module Notgios
       end
     end
 
-    get '/get_tasks/?:task?' do
-      [
-        {
-          name: 'Stream',
-          address: '104.236.124.232',
-          tasks: [
-            {
-              id: 5,
-              type: 'process',
-              metric: 'cpu',
-              freq: 5,
-              options: {
-                keepalive: true,
-                pidfile: '/root/working/a.pid',
-                runcmd: '/root/working/a.out'
-              }
-            },
-            {
-              id: 6,
-              type: 'process',
-              metric: 'memory',
-              freq: 600,
-              options: {
-                keepalive: false,
-                pidfile: '/root/working/stuff.pid',
-                runcmd: '/root/working/stuff'
-              }
-            }
-          ]
-        },
-        {
-          name: 'Monitored',
-          address: '159.203.119.88',
-          tasks: [
-            {
-              id: 7,
-              type: 'directory',
-              freq: 3600,
-              options: {
-                path: '/root/git'
-              }
-            }
-          ]
-        }
-      ].to_json
+    get '/get_tasks' do
+      Helpers.with_nodis do |nodis|
+        tasks = nodis.get_jobs_for_user(params['username']).map do |task|
+          remapped = {
+            id: task['id'],
+            address: task['address'],
+            type: task['type'].downcase,
+            metric: task['metric'].downcase,
+            freq: task['freq'],
+            options: {}
+          }
+          JSON.parse(task['options']).each do |option|
+            index = option.index(' ')
+            key = option[0...index]
+            remapped[:options][key] = option[(index + 1)..-1]
+          end
+        end
+        nodis.get_servers(params['username']).map do |server|
+          subtasks = Array.new
+          tasks.delete_if { |task| subtasks.push(task) if task.server == server.address }
+          server['tasks'] = subtasks
+          server
+        end
+      end
     end
 
     get '/get_metrics/:task_id' do

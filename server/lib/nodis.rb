@@ -74,7 +74,10 @@ module Notgios
       raise WrongUserError, "Server #{job.address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", job.address)
       job.id = incr('notgios.id')
       sadd("notgios.users.#{username}.jobs", job.id)
-      hmset("notgios.jobs.#{job.id}", *job.to_h.delete('command'))
+      job_hash = job.to_h
+      job_hash.delete('command')
+      job_hash['options'] = job_hash['options'].to_json
+      hmset("notgios.jobs.#{job.id}", *job_hash)
     end
 
     # Expects:
@@ -103,7 +106,7 @@ module Notgios
       jobs
     end
 
-    # Only to be used during startup.
+    # Only to be used during startup and by the Prospector.
     def get_all_jobs
       jobs = Hash.new { |h, k| h[k] = Array.new }
       smembers("notgios.users").each do |user|
@@ -208,12 +211,13 @@ module Notgios
     # Expects:
     # username - String
     # address - String, ip address of server
-    # hostname - String, hostname of server if one exists, otherwise ip address again
+    # name - Name given to server by the user.
     # ssh_port - Fixnum
-    def add_server(username, address, hostname, ssh_port = 22)
+    def add_server(username, address, name, ssh_port = 22)
       raise ResourceExistsError if exists("notgios.servers.#{address}")
       sadd("notgios.users.#{username}.servers", address)
-      hset("notgios.servers.#{address}", 'hostname', hostname)
+      hset("notgios.servers.#{address}", 'name', name)
+      hset("notgios.servers.#{address}", 'address', address)
       hset("notgios.servers.#{address}", 'ssh_port', ssh_port)
     end
 
@@ -283,6 +287,20 @@ module Notgios
       contacts = Array.new
       smembers("notgios.users.#{username}.contacts").each { |id| contacts.push(hgetall("notgios.contacts.#{id}")) }
       contacts
+    end
+
+    # Metrics Commands - Only to be called by the Prospector
+
+    # Expects
+    # id - Fixnum, job id
+    # count - Maximum number of results to return.
+    def get_recent_metrics(id, count = 100)
+      raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
+      zrange("notgios.metrics.#{id}", -count, -1, with_scores: true).map do |resp|
+        report = JSON.parse(resp.first)
+        report['timestamp'] = resp.last
+        report
+      end
     end
 
   end

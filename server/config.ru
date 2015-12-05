@@ -35,12 +35,12 @@ module Notgios
   # Command Struct Field Types:
   # id - Fixnum, task id.
   # command - Symbol
-  # address - String, ip address of server task is running on.
+  # server - String, ip address of server task is running on.
   # type - Symbol/String
   # freq - Fixnum/String
   # metric - Symbol/String
   # options - Array of strings already in backend format.
-  CommandStruct = Struct.new(:id, :command, :address, :type, :freq, :metric, :options)
+  CommandStruct = Struct.new(:id, :command, :server, :type, :freq, :metric, :options)
 
   # Error Struct Field Types:
   # id - Fixnum, task id.
