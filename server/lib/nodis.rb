@@ -68,8 +68,10 @@ module Notgios
 
     # Expects:
     # username - String
+    # address - String
     # job - CommandStruct
     def add_job(username, job)
+      raise WrongUserError, "Server #{job.address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", job.address)
       job.id = incr('notgios.id')
       sadd("notgios.users.#{username}.jobs", job.id)
       hmset("notgios.jobs.#{job.id}", *job.to_h.delete('command'))
@@ -184,7 +186,6 @@ module Notgios
       else
         raise InvalidJobError, "Unknown job type #{type}"
       end
-      lpush("notgios.reports.#{id}", report)
     rescue NoMethodError
       raise InvalidJobError, 'Hit a NoMethodError while processing job'
     end
@@ -216,11 +217,25 @@ module Notgios
       hset("notgios.servers.#{address}", 'ssh_port', ssh_port)
     end
 
+    # This is left unauthenticated because it's only to be called from the MiddleMan.
+    def mark_connected(address)
+      raise WrongUserError, "Server #{address} is not owned by used #{username}" unless sismember("notgios.users.#{username}.servers", address)
+      raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
+      hset("notgios.servers.#{address}", 'connected', 'true')
+    end
+
+    # This is left unauthenticated because it's only to be called from the MiddleMan.
+    def mark_disconnected(address)
+      raise WrongUserError, "Server #{address} is not owned by used #{username}" unless sismember("notgios.users.#{username}.servers", address)
+      raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
+      hset("notgios.servers.#{address}", 'connected', 'false')
+    end
+
     # Expects:
     # username - String
     # address - String, ip address of server
     def get_hostname(username, address)
-      raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers")
+      raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
       hget("notgios.servers.#{address}", 'hostname')
     end
@@ -229,7 +244,7 @@ module Notgios
     # username - String
     # address - String, ip address of server
     def get_ssh_port(username, address)
-      raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers")
+      raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
       hget("notgios.servers.#{address}", 'ssh_port')
     end
@@ -245,7 +260,7 @@ module Notgios
     # username - String
     # address - String, ip address of server
     def delete_server(username, address)
-      raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers")
+      raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
       multi do
         srem("notgios.users.#{username}.servers", address)

@@ -168,6 +168,10 @@ module Notgios
           keepalive_timer = Time.now
           begin
             Helpers.with_nodis do |nodis|
+              # Mark the server as connected.
+              nodis.mark_connected(monitor.address)
+              @logger.debug("MiddleMan Handler: Marked server #{monitor.address} as connected...")
+
               # Spin until the server initiates an orderly shutdown, or until we encounter a socket
               # error.
               until Thread.current[:should_halt].exists?
@@ -209,12 +213,16 @@ module Notgios
               @logger.debug('MiddleMan Handler: Beginning orderly shutdown...')
               socket.write('NGS BYE')
               socket.close
+              nodis.mark_disconnected(monitor.address)
+              @logger.debug("MiddleMan Handler: Marked server #{monitor.address} as disconnected...")
               @dead_handlers.push(handler)
             end
           rescue SocketClosedError
             @logger.error('MiddleMan Handler: Encountered an error with the monitor socket, exiting...')
             socket.close
             monitor.socket = nil
+            Helpers.with_nodis { |nodis| nodis.mark_disconnected(monitor.address) }
+            @logger.debug("MiddleMan Handler: Marked server #{monitor.address} as disconnected...")
             @monitor_handlers.delete(monitor.address)
             @dead_handlers.push(handler)
           end
