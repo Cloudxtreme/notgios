@@ -4,6 +4,7 @@
 /*----- Local Includes -----*/
 
 #include "monitor.h"
+#include <time.h>
 
 /*----- Constant Declaractions -----*/
 
@@ -17,6 +18,7 @@ typedef struct task_report {
   metric_type_t metric;
   char id[NOTGIOS_MAX_NUM_LEN], message[NOTGIOS_ERROR_BUFSIZE];
   double percentage, value;
+  time_t time_taken;
 } task_report_t;
 
 /*----- Function Declarations -----*/

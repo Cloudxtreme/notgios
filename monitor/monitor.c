@@ -61,12 +61,11 @@ void handle_child();
 
 // High Level Network Functions
 void send_reports(int socket);
-int handle_process_report(task_report_t *report, char *start, char *buffer);
+int handle_process_total_report(task_report_t *report, char *start, char *buffer);
 int handle_directory_report(task_report_t *report, char *start, char *buffer);
 int handle_disk_report(task_report_t *report, char *start, char *buffer);
 int handle_swap_report(task_report_t *report, char *start, char *buffer);
 int handle_load_report(task_report_t *report, char *start, char *buffer);
-int handle_total_report(task_report_t *report, char *start, char *buffer);
 
 // Low Level Network Functions
 int create_server(short port);
@@ -647,7 +646,7 @@ void send_reports(int socket) {
       // Task is good.
       switch (report.type) {
         case PROCESS:
-          retval = handle_process_report(&report, start, buffer);
+          retval = handle_process_total_report(&report, start, buffer);
           break;
         case DIRECTORY:
           retval = handle_directory_report(&report, start, buffer);
@@ -662,7 +661,7 @@ void send_reports(int socket) {
           retval = handle_load_report(&report, start, buffer);
           break;
         case TOTAL:
-          retval = handle_total_report(&report, start, buffer);
+          retval = handle_process_total_report(&report, start, buffer);
           break;
         default:
           write_log(LOG_DEBUG, "Monitor: Found an invalid report while sending reports...\n");
@@ -670,7 +669,8 @@ void send_reports(int socket) {
       }
     } else {
       // Task encountered an error.
-      sprintf(buffer, "%s\nID %s\n%s\n\n", start, report.id, report.message);
+      long timestamp = report.time_taken;
+      sprintf(buffer, "%s\nID %s\nTIMESTAMP %ld\n%s\n\n", start, report.id, timestamp, report.message);
     }
 
     if (retval == NOTGIOS_SUCCESS) {
@@ -682,7 +682,7 @@ void send_reports(int socket) {
   }
 }
 
-int handle_process_report(task_report_t *report, char *start, char *buffer) {
+int handle_process_total_report(task_report_t *report, char *start, char *buffer) {
   char specific_msg[NOTGIOS_SMALL_BUFSIZE];
 
   // Write our metric specific message.
@@ -697,12 +697,13 @@ int handle_process_report(task_report_t *report, char *start, char *buffer) {
       sprintf(specific_msg, "IO PERCENT %.2f", report->percentage);
       break;
     default:
-      write_log(LOG_DEBUG, "Monitor: Found an invalid process report while sending reports...\n");
+      write_log(LOG_DEBUG, "Monitor: Found an invalid process/total report while sending reports...\n");
       return NOTGIOS_GENERIC_ERROR;
   }
 
   // Write the full message.
-  sprintf(buffer, "%s\nID %s\n%s\n\n", start, report->id, specific_msg);
+  long timestamp = report->time_taken;
+  sprintf(buffer, "%s\nID %s\nTIMESTAMP %ld\n%s\n\n", start, report->id, timestamp, specific_msg);
   return NOTGIOS_SUCCESS;
 }
 
@@ -711,7 +712,8 @@ int handle_directory_report(task_report_t *report, char *start, char *buffer) {
     write_log(LOG_DEBUG, "Monitor: Found an invalid directory report while sending reports...\n");
     return NOTGIOS_GENERIC_ERROR;
   }
-  sprintf(buffer, "%s\nID %s\nBYTES %ld\n\n", start, report->id, (long) report->value);
+  long timestamp = report->time_taken;
+  sprintf(buffer, "%s\nID %s\nTIMESTAMP %ld\nBYTES %ld\n\n", start, report->id, timestamp, (long) report->value);
   return NOTGIOS_SUCCESS;
 }
 
@@ -724,10 +726,6 @@ int handle_swap_report(task_report_t *report, char *start, char *buffer) {
 }
 
 int handle_load_report(task_report_t *report, char *start, char *buffer) {
-  // TODO: Implement this function.
-}
-
-int handle_total_report(task_report_t *report, char *start, char *buffer) {
   // TODO: Implement this function.
 }
 

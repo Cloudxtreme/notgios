@@ -10,7 +10,6 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <netinet/in.h>
-#include <time.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <dirent.h>
@@ -337,6 +336,7 @@ int handle_directory(task_option_t *options, char *id) {
   long retval = directory_memory_collect(path);
   if (retval >= 0) {
     report.value = (double) retval;
+    report.time_taken = time(NULL);
   } else if (retval == NOTGIOS_BAD_ACCESS) {
     write_log(LOG_ERR, "Task %s: Access was refused for a subdirectory...\n", id);
     sprintf(report.message, "FATAL CAUSE SUBDIR_NOT_ACCESSIBLE");
@@ -366,7 +366,43 @@ int handle_load(char *id) {
 }
 
 int handle_total(char *id, metric_type_t metric) {
-  // TODO: Write this function.
+  task_report_t report;
+  init_task_report(&report, id, PROCESS, metric);
+
+  int retval;
+  switch (metric) {
+    case MEMORY:
+      retval = total_memory_collect(&report);
+      if (retval == NOTGIOS_UNSUPP_DISTRO) RETURN_UNSUPPORTED_DISTRO(report, id);
+      write_log(LOG_DEBUG, "Task %s: Total memory info collected...\n", id);
+      break;
+    case CPU:
+      retval = total_cpu_collect(&report);
+      if (retval == NOTGIOS_UNSUPP_DISTRO) RETURN_UNSUPPORTED_DISTRO(report, id);
+      write_log(LOG_DEBUG, "Task %s: Total CPU usage collected...\n", id);
+      break;
+    case IO:
+      // This is currently unimplemented.
+      retval = total_io_collect(&report);
+      break;
+    default:
+      // We've been passed a task containing invalid options. Shouldn't happen, but handle it
+      // for debugging.
+      sprintf(report.message, "FATAL CAUSE INVALID_TASK");
+      lpush(&reports, &report);
+      return NOTGIOS_GENERIC_ERROR;
+  }
+
+  if (retval == NOTGIOS_UNSUPP_TASK) {
+    write_log(LOG_DEBUG, "Task %s: Received an unsupported task. Removing...\n", id);
+    sprintf(report.message, "FATAL CAUSE UNSUPPORTED_TASK");
+    lpush(&reports, &report);
+    return NOTGIOS_TASK_FATAL;
+  }
+
+  write_log(LOG_DEBUG, "Task %s: Enqueuing report an returning...\n", id);
+  lpush(&reports, &report);
+  return NOTGIOS_SUCCESS;
 }
 
 int process_memory_collect(uint16_t pid, task_report_t *data) {
@@ -378,6 +414,7 @@ int process_memory_collect(uint16_t pid, task_report_t *data) {
     int retval = fscanf(statm, "%ld", &usage);
     if (retval == 1) {
       data->value = (double) usage;
+      data->time_taken = time(NULL);
       return NOTGIOS_SUCCESS;
     } else {
       return NOTGIOS_NOPROC;
@@ -394,7 +431,7 @@ int process_memory_collect(uint16_t pid, task_report_t *data) {
 // the only option.
 int process_cpu_collect(uint16_t pid, task_report_t *data) {
   unsigned long start_pid_user, end_pid_user, start_pid_sys, end_pid_sys, start_pid_total, end_pid_total;
-  unsigned long start_user, end_user, start_nice, end_nice, start_sys, end_sys, start_idle, end_idle;
+  unsigned long start_user, end_user, start_nice, end_nice, start_sys, end_sys, start_idle, end_idle, start_io, end_io;
   unsigned long start_global_total, end_global_total;
   int retvals[2];
   char path[NOTGIOS_MAX_PROC_LEN];
@@ -426,7 +463,7 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
   // Get the processor times the first time.
   // The stars in the format strings represent that the value exists but that we're not interested in it.
   retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &start_pid_user, &start_pid_sys);
-  retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &start_user, &start_nice, &start_sys, &start_idle);
+  retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu %lu", &start_user, &start_nice, &start_sys, &start_idle, &start_io);
   fclose(pid_stats);
   fclose(global_stats);
 
@@ -437,7 +474,7 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
     return NOTGIOS_NOPROC;
   }
   start_pid_total = start_pid_user + start_pid_sys;
-  start_global_total = start_user + start_nice + start_sys + start_idle;
+  start_global_total = start_user + start_nice + start_sys + start_idle + start_io;
 
   // Sleep for a second and get updated statistics.
   sleep(1);
@@ -455,7 +492,7 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
 
   // Get the updated processor times.
   retvals[0] = fscanf(pid_stats, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*lu %*lu %*lu %*lu %lu %lu", &end_pid_user, &end_pid_sys);
-  retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle);
+  retvals[1] = fscanf(global_stats, "%*s %lu %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle, &end_io);
   fclose(pid_stats);
   fclose(global_stats);
 
@@ -466,10 +503,11 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
     return NOTGIOS_NOPROC;
   }
   end_pid_total = end_pid_user + end_pid_sys;
-  end_global_total = end_user + end_nice + end_sys + end_idle;
+  end_global_total = end_user + end_nice + end_sys + end_idle + end_io;
 
   // Perform the calculation.
   data->percentage = (end_pid_total - start_pid_total) * 100 / (double) (end_global_total - start_global_total);
+  data->time_taken = time(NULL);
 
   return NOTGIOS_SUCCESS;
 }
@@ -553,15 +591,60 @@ int load_collect(uint16_t pid, task_report_t *data) {
 }
 
 int total_memory_collect(task_report_t *data) {
-  // TODO: Write this function.
+  // Open the proc file for memory usage.
+  FILE *mem_stats = fopen("/proc/meminfo", "r");
+  long mem_total, mem_available;
+  if (!mem_stats) return NOTGIOS_UNSUPP_DISTRO;
+
+  // /proc/meminfo was apparently significantly changed with CentOS 7. Don't need to add
+  // buffers/caches anymore, there's a field that shows actual memory free. Won't work on
+  // older systems, but I'm not attempting to be compatible with anything before systemd
+  // was added at the moment. Should fix this eventually.
+  // FIXME: Incompatible with CentOS < 7.
+  int retval = fscanf(mem_stats, "MemTotal: %ld kB\nMemFree: %*ld kB\nMemAvailable: %ld kB", &mem_total, &mem_available);
+  fclose(mem_stats);
+  if (retval != 2) return NOTGIOS_UNSUPP_DISTRO;
+
+  data->percentage = mem_available / (double) mem_total;
+  data->time_taken = time(NULL);
+  return NOTGIOS_SUCCESS;
 }
 
 int total_cpu_collect(task_report_t *data) {
-  // TODO: Write this function.
+  unsigned long start_user, end_user, start_nice, end_nice, start_sys, end_sys, start_idle, end_idle, start_io, end_io;
+  FILE *cpu_stats = fopen("/proc/stat", "r");
+  if (!cpu_stats) return NOTGIOS_UNSUPP_DISTRO;
+
+  // Get the initial values.
+  int retval = fscanf(cpu_stats, "%*s %lu %lu %lu %lu %lu", &start_user, &start_nice, &start_sys, &start_idle, &start_io);
+  if (retval != 5) {
+    fclose(cpu_stats);
+    return NOTGIOS_UNSUPP_DISTRO;
+  }
+  fclose(cpu_stats);
+
+  // Sleep for a second.
+  sleep(1);
+
+  // Get the final values.
+  cpu_stats = fopen("/proc/stat", "r");
+  retval = fscanf(cpu_stats, "%*s %lu %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle, end_io);
+  if (retval != 5) return NOTGIOS_UNSUPP_DISTRO;
+
+  // Perform the calculation.
+  unsigned long start_idle_total = start_idle + start_io, end_idle_total = end_idle + end_io;
+  unsigned long start_total = start_user + start_nice + start_sys + start_idle + start_io;
+  unsigned long end_total = end_user + end_nice + end_sys + end_idle + end_io;
+  unsigned long total_delta = end_total - start_total;
+  data->percentage = (total_delta - (end_idle_total - start_idle_total)) / (double) total_delta;
+  data->time_taken = time(NULL);
+  
+  return NOTGIOS_SUCCESS;
 }
 
 int total_io_collect(task_report_t *data) {
-  // TODO: Write this function.
+  // I'll write this function someday when I have time.
+  return NOTGIOS_UNSUPP_TASK;
 }
 
 // Function checks whether or not it's possible to access memory statistics for our own process.
