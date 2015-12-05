@@ -6,13 +6,13 @@ notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider,
     controller: 'homeController'
   }).when('/tasks', {
     templateUrl: '/templates/tasks.html',
-    controller: 'taskController'
+  controller: 'taskController'
   }).when('/alarms', {
     templateUrl: '/templates/alarms.html',
-    controller: 'alarmController'
+  controller: 'alarmController'
   }).when('/contacts', {
     templateUrl: '/templates/contacts.html',
-    controller: 'contactController'
+  controller: 'contactController'
   }).otherwise({
     redirectTo: '/'
   });
@@ -28,35 +28,35 @@ notgios.factory('authenticated', ['$cookies', '$http', function ($cookies, $http
   };
 
   authentication.getData = function (url, success, failure) {
-    $http({
-      method: 'GET',
-      url: url,
-      headers: {
-        'Authorization': 'Bearer ' + $cookies.get('token')
-      }
-    }).then(success, failure);
+    if ($cookies.get('token') != null) {
+      $http({
+        method: 'GET',
+        url: url
+      }).then(success, failure);
+    }
   };
 
   authentication.sendData = function (url, data, success, failure) {
-    $http({
-      method: 'POST',
-      url: url,
-      headers: {
-        'Authorization': 'Bearer ' + $cookies.get('token')
-      }
-    }).then(success, failure);
+    if ($cookies.get('token') != null) {
+      $http({
+        method: 'POST',
+        url: url
+      }).then(success, failure);
+    }
   };
 
   authentication.logIn = function (token) {
     if (token) {
-      $cookies.put('token', token);
+      var tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      $cookies.put('token', token, { expires: tomorrow });
     }
   };
 
   authentication.logOut = function () {
     $cookies.remove('token');
   };
-  
+
   return authentication;
 }]);
 
@@ -123,7 +123,71 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
 
   $scope.showVis = function (task) {
     $scope.shownVis = task;
-    $('#highcharts').highcharts();
+    $('#highcharts').highcharts({
+      chart: {
+        type: 'scatter',
+        margin: [70, 50, 60, 80],
+        events: {
+          click: function (e) {
+            // find the clicked values and the series
+            var x = e.xAxis[0].value,
+            y = e.yAxis[0].value,
+            series = this.series[0];
+
+            // Add it
+            series.addPoint([x, y]);
+          }
+        }
+      },
+      title: {
+        text: 'User supplied data'
+      },
+      subtitle: {
+        text: 'Click the plot area to add a point. Click a point to remove it.'
+      },
+      xAxis: {
+        gridLineWidth: 1,
+        minPadding: 0.2,
+        maxPadding: 0.2,
+        maxZoom: 60
+      },
+      yAxis: {
+        title: {
+          text: 'Value'
+        },
+        minPadding: 0.2,
+        maxPadding: 0.2,
+        maxZoom: 60,
+        plotLines: [{
+          value: 0,
+          width: 1,
+          color: '#808080'
+        }]
+      },
+      legend: {
+        enabled: false
+      },
+      exporting: {
+        enabled: false
+      },
+      plotOptions: {
+        series: {
+          lineWidth: 1,
+          point: {
+            events: {
+              'click': function () {
+                if (this.series.data.length > 1) {
+                  this.remove();
+                }
+              }
+            }
+          }
+        }
+      },
+      series: [{
+        data: [[20, 20], [80, 80]]
+      }]
+    });
   };
 
 }]);
@@ -184,7 +248,7 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
     if (value == 'Phone Number') $scope.contactType = 'number';
     else $scope.contactType = 'email';
   }
-  
+
   // I should have Angular do the form validation for me, but I don't have time to figure it out right now.
   $scope.signUp = function ($event) {
     if ($scope.username && $scope.username.length > 0 && $scope.password && $scope.password.length > 0) {
@@ -194,8 +258,8 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
           url: '/sign_up',
           data: {
             username: $scope.username,
-            password: $scope.password,
-            contact: $scope.contact
+          password: $scope.password,
+          contact: $scope.contact
           }
         }).then(function success(response) {
           $scope.submissionError = '';
@@ -220,23 +284,23 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
 notgios.directive('serverTable', function () {
   return {
     templateUrl: '/templates/server_table.html',
-    replace: true,
-    scope: {
-      servers: "=servers",
-      status: "=connected",
-      showServer: "=callback",
-      title: "=header"
-    }
+  replace: true,
+  scope: {
+    servers: "=servers",
+  status: "=connected",
+  showServer: "=callback",
+  title: "=header"
+  }
   };
 });
 
 notgios.directive('taskTable', function () {
   return {
     templateUrl: '/templates/task_table.html',
-    replace: true,
-    scope: {
-      taskData: "=tasks",
-      showVis: "=callback"
-    }
+  replace: true,
+  scope: {
+    taskData: "=tasks",
+  showVis: "=callback"
+  }
   };
 });

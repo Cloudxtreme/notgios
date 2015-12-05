@@ -10,11 +10,10 @@ module Notgios
     # Enforce Authentication before handling routes.
     before do
       # Exclude the login and sign up routes.
-      pass if %w{ sign_in sign_up }.include?(request.path_info.split('/')[1])
+      pass if %w{ sign_in sign_up tasks alarms contacts }.include?(request.path_info.split('/')[1]) || request.path_info.split('/')[1].nil?
 
-      authorization = headers 'Authorization'
+      token = request.cookies['token']
       begin
-        token = authorization.split(' ')[1]
         if token.exists?
           decoded = AuthToken.decode(token)
           halt 401 unless decoded.exists?

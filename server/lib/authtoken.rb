@@ -19,11 +19,11 @@ module Notgios
   class DecodedAuthToken < Hash
 
     def [](key)
-      super(key.to_s)
+      super.[](key.to_s)
     end
 
     def []=(key, value)
-      super(key.to_s, value)
+      super.[]=(key.to_s, value)
     end
 
     def expired?
