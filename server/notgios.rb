@@ -33,7 +33,7 @@ module Notgios
       erb :index
     end
 
-    get '/get_servers/?:server?' do
+    get '/get_servers' do
       Helpers.with_nodis do |nodis|
         connected, disconnected = Array.new, Array.new
         nodis.get_servers(params['username']).each { |server| server.connected.to_b ? connected.push(server) : disconnected.push(server) }
@@ -71,7 +71,13 @@ module Notgios
     end
 
     get '/get_metrics/:task_id' do
-
+      Helpers.with_nodis do |nodis|
+        begin
+          nodis.get_recent_metrics(params['task_id'], params['username'], params['count'] || 100)
+        rescue
+          halt 400
+        end
+      end
     end
 
     post '/sign_up' do

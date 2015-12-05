@@ -289,12 +289,13 @@ module Notgios
       contacts
     end
 
-    # Metrics Commands - Only to be called by the Prospector
+    # Metrics Commands
 
     # Expects
     # id - Fixnum, job id
     # count - Maximum number of results to return.
-    def get_recent_metrics(id, count = 100)
+    def get_recent_metrics(id, username = nil, count = 100)
+      raise WrongUserError, "Job #{id} does not belong to user #{username}" unless username.nil? || sismember("notgios.users.#{username}.jobs", id)
       raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
       zrange("notgios.metrics.#{id}", -count, -1, with_scores: true).map do |resp|
         report = JSON.parse(resp.first)
