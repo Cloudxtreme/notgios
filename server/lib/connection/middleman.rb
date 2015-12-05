@@ -10,7 +10,6 @@ module Notgios
 
     class MiddleMan
 
-      # FIXME: Need to set up a proper logger here.
       def initialize(listen_port, tasks, logger = Logger.new(STDOUT))
         @listen_socket = NotgiosSocket.new(port: listen_port)
         @connections, @connection_lock = Hash.new, Mutex.new
@@ -26,6 +25,12 @@ module Notgios
 
         start_listening_thread
         start_supervisor_thread
+      end
+
+      # Add an initial monitor task for this server when it joins.
+      def add_server(address, id)
+        cmd = CommandStruct.new(id, :add, address, 'TOTAL', 600, 'CPU', [])
+        @connection_lock.synchronize { @connections[address] = MonitorStruct.new(nil, [cmd], Queue.new, address) }
       end
 
       # Function used by server to send a command to a monitor.
@@ -138,6 +143,10 @@ module Notgios
           @logger.debug('MiddleMan Handler: Received a valid job report, enqueuing...')
           begin
             nodis.post_job_report(id, message.slice(2..-1).to_json)
+          rescue Nodis::InvalidJobError
+            @logger.error('MiddleMan Handler: Invalid job report, dumping...')
+          rescue Nodis::UnsupportedJobError
+            @logger.error('MiddleMan Handler: Unsupported job report, dumping...')
           rescue Nodis::NoSuchResourceError
             @logger.debug('MiddleMan Handler: Task has been removed, but monitor hasn\'t been notified yet. Dumping report...')
           end

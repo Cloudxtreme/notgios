@@ -5,6 +5,7 @@ module Notgios
     ResourceExistsError = Class.new(StandardError)
     NoSuchResourceError = Class.new(StandardError)
     InvalidJobError = Class.new(StandardError)
+    UnsupportedJobError = Class.new(StandardError)
     WrongUserError = Class.new(StandardError)
 
     # User Commands
@@ -129,7 +130,63 @@ module Notgios
     # report - JSON String
     def post_job_report(id, report)
       raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
+      type = hget("notgios.jobs.#{id}", type)
+      metric = hget("notgios.jobs.#{id}", metric)
+
+      # Grab the timestamp for the report.
+      timestamp = report.shift.scan(/TIMESTAMP (\d+)/)
+      raise InvalidJobError, 'Timestamp field of job report was malformed' unless timestamp.exists? && timestamp.first.exists?
+      timestamp = timestamp.first.first
+
+      case type.downcase
+      when 'process', 'total'
+        case metric.downcase
+        when 'cpu'
+          # Grab the CPU usage and add it to the zset.
+          percent = report.shift.scan(/CPU PERCENT (\d+\.\d+)/)
+          if percent.exists? && percent.first.exists?
+            zadd("notgios.reports.#{id}", timestamp.to_i, { cpu: percent.first.first }.to_json)
+          else
+            raise InvalidJobError, 'CPU field of job report was malformed'
+          end
+        when 'memory'
+          # Grab the memory usage and add it to the zset.
+          memory = report.shift.scan(/BYTES (\d+)/)
+          if memory.exists? && memory.first.exists?
+            zadd("notgios.reports.#{id}", timestamp.to_i, { bytes: memory.first.first }.to_json)
+          else
+            raise InvalidJobError, 'BYTES field of job report was malformed'
+          end
+        when 'io'
+          raise UnsupportedJobError, 'Job metric IO isn\'t supported currently'
+        else
+          raise InvalidJobError, "Unknown job metric #{metric} for process type"
+        end
+      when 'directory'
+        case metric.downcase
+        when 'memory'
+          # Grab the memory usage and add it to the zset.
+          memory = report.shift.scan(/BYTES (\d+)/)
+          if memory.exists? && memory.first.exists?
+            zadd("notgios.reports.#{id}", timestamp.to_i, { bytes: memory.first.first }.to_json)
+          else
+            raise InvalidJobError, 'BYTES field of job report was malformed'
+          end
+        else
+          raise InvalidJobError, "Unknown job metric #{metric} for directory type"
+        end
+      when 'disk'
+        raise UnsupportedJobError, 'Job type disk isn\'t currently supported'
+      when 'swap'
+        raise UnsupportedJobError, 'Job type swap isn\' currently supported'
+      when 'load'
+        raise UnsupportedJobError, 'Job type load isn\'t currently supported'
+      else
+        raise InvalidJobError, "Unknown job type #{type}"
+      end
       lpush("notgios.reports.#{id}", report)
+    rescue NoMethodError
+      raise InvalidJobError, 'Hit a NoMethodError while processing job'
     end
 
     # Expects:
