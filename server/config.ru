@@ -19,6 +19,8 @@ require 'tilt/erb'
 require 'rack/parser'
 require 'byebug'
 
+Thread.abort_on_exception = true
+
 # Set up a parser since Angular sends post params weirdly.
 use Rack::Parser, content_types: { 'application/json' => Proc.new { |body| JSON.parse(body) } }
 

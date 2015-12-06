@@ -61,7 +61,7 @@ module Notgios
 
         # Send command to monitor.
         # Don't handle potential exceptions from write, let our calling method handle it.
-        case cmd.command
+        case cmd.command.to_sym
         when :add
           @logger.debug('MiddleMan Handler: Sending an add command...')
           socket.write([
@@ -144,7 +144,7 @@ module Notgios
           # call could potentially raise a NoSuchResourceError. In this case, just swallow the exception and log it.
           @logger.debug('MiddleMan Handler: Received a valid job report, enqueuing...')
           begin
-            nodis.post_job_report(id, message.slice(2..-1).to_json)
+            nodis.post_job_report(id, message.slice(2..-1))
           rescue Nodis::InvalidJobError
             @logger.error('MiddleMan Handler: Invalid job report, dumping...')
           rescue Nodis::UnsupportedJobError
