@@ -628,7 +628,7 @@ int total_cpu_collect(task_report_t *data) {
   unsigned long start_total = start_user + start_nice + start_sys + start_idle + start_io;
   unsigned long end_total = end_user + end_nice + end_sys + end_idle + end_io;
   unsigned long total_delta = end_total - start_total;
-  data->percentage = (total_delta - (end_idle_total - start_idle_total)) / (double) total_delta;
+  data->percentage = 100 * (total_delta - (end_idle_total - start_idle_total)) / (double) total_delta;
   data->time_taken = time(NULL);
   
   return NOTGIOS_SUCCESS;
