@@ -10,7 +10,7 @@ module Notgios
     # Enforce Authentication before handling routes.
     before do
       # Exclude the login and sign up routes.
-      pass if %w{ sign_in sign_up tasks alarms contacts }.include?(request.path_info.split('/')[1]) || request.path_info.split('/')[1].nil?
+      pass if %w{ sign_in sign_up tasks }.include?(request.path_info.split('/')[1]) || request.path_info.split('/')[1].nil?
 
       token = request.cookies['token']
       begin
@@ -28,7 +28,7 @@ module Notgios
     end
 
     # Base route.
-    get %r{^/(tasks|alarms|contacts)?$} do
+    get %r{^/(tasks|alarms)?$} do
       erb :index
     end
 

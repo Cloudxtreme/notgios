@@ -92,6 +92,7 @@
               <input type="text" class="form-control" ng-model="shownTask.freq">
               <span class="input-group-addon">(s)</span>
             </div>
+            <button class="btn btn-danger below" ng-click="deleteTask()">Delete</button>
           </div>
           <div class="modal-footer">
             <button class="btn btn-default" type="button" data-dismiss="modal">Cancel</button>
@@ -102,6 +103,9 @@
     </div>
   </div>
   <div ng-if="!loggedIn()" class="container-fluid">
-
+    <div class="jumbotron">
+      <h1>Here are where you tasks would be!</h1>
+      <p>Notgios allows you to define specific "tasks" on any server that you connect so that you can easily visualize memory (or cpu) usage of processes and directories.
+    </div>
   </div>
 </div>

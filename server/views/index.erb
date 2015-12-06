@@ -25,8 +25,6 @@
           <ul class="nav navbar-nav">
             <li ng-class="{ active: isActive('/') }"><a href="/">Home</a></li>
             <li ng-class="{ active: isActive('/tasks') }"><a href="/tasks">Tasks</a></li>
-            <li ng-class="{ active: isActive('/alarms') }"><a href="/alarms">Alarms</a></li>
-            <li ng-class="{ active: isActive('/contacts') }"><a href="/contacts">Contact Info</a></li>
           </ul>
           <ul ng-if="!loggedIn()" class="nav navbar-nav navbar-right">
             <li class="dropdown">
@@ -85,20 +83,6 @@
             <div class="input-group below">
               <span class="input-group-addon" id="desired-pass-confirm-addon">Confirm Password&nbsp;</span>
               <input ng-model="passConfirm" type="password" class="form-control" aria-descrbedby="desired-pass-confirm-addon" required>
-            </div>
-            <br>
-            <h5>Please provide at least one method of contact for alarms:</h5>
-            <div class="row-fluid">
-              <div class="btn-group">
-                <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                  {{ dropdown }} <span class="caret"></span>
-                </button>
-                <ul class="dropdown-menu">
-                  <li><a ng-click="setDropdown('Phone Number ')" href="#">Phone Number</a></li>
-                  <li><a ng-click="setDropdown('Email Address')" href="#">Email Address</a></li>
-                </ul>
-              </div>
-              <input ng-model="contact" type="text" class="form-control inline-input" aria-describedby="contact-addon" required>
             </div>
             <br>
             <p class="error-message">{{ submissionError }}</p>

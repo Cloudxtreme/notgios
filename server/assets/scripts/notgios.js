@@ -7,12 +7,6 @@ notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider,
   }).when('/tasks', {
     templateUrl: '/templates/tasks.html',
   controller: 'taskController'
-  }).when('/alarms', {
-    templateUrl: '/templates/alarms.html',
-  controller: 'alarmController'
-  }).when('/contacts', {
-    templateUrl: '/templates/contacts.html',
-  controller: 'contactController'
   }).otherwise({
     redirectTo: '/'
   });
@@ -203,7 +197,7 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
         }
       }
     }
-    if ($scope.shownTask.type == 'directory') $scope.shownType.metric = 'memory'
+    if ($scope.shownTask.type == 'directory') $scope.shownTask.metric = 'memory'
     $scope.shownTask.options = sanitized;
     var data = JSON.parse(JSON.stringify($scope.shownTask));
     data.server = $scope.shownServer.address;
@@ -278,14 +272,6 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
 
 }]);
 
-notgios.controller('alarmController', ['$scope', '$http', function ($scope, $http) {
-
-}]);
-
-notgios.controller('contactController', ['$scope', '$http', function ($scope, $http) {
-
-}]);
-
 notgios.controller('navbarController', ['$scope', '$http', '$route', 'authenticated', function ($scope, $http, $route, authenticated) {
 
   $scope.loggedIn = authenticated.loggedIn;
@@ -338,7 +324,7 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
   // I should have Angular do the form validation for me, but I don't have time to figure it out right now.
   $scope.signUp = function () {
     if ($scope.username && $scope.username.length > 0 && $scope.password && $scope.password.length > 0) {
-      if ($scope.password == $scope.passConfirm && $scope.contact && $scope.contact.length > 0) {
+      if ($scope.password == $scope.passConfirm) {
         $http({
           method: 'POST',
           url: '/sign_up',
