@@ -628,7 +628,7 @@ int total_cpu_collect(task_report_t *data) {
 
   // Get the final values.
   cpu_stats = fopen("/proc/stat", "r");
-  retval = fscanf(cpu_stats, "%*s %lu %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle, end_io);
+  retval = fscanf(cpu_stats, "%*s %lu %lu %lu %lu %lu", &end_user, &end_nice, &end_sys, &end_idle, &end_io);
   if (retval != 5) return NOTGIOS_UNSUPP_DISTRO;
 
   // Perform the calculation.

@@ -420,6 +420,7 @@ void handle_add(char **commands, char *reply_buf) {
   else if (!strcmp(type_str, "DISK")) type = DISK;
   else if (!strcmp(type_str, "SWAP")) type = SWAP;
   else if (!strcmp(type_str, "LOAD")) type = LOAD;
+  else if (!strcmp(type_str, "TOTAL")) type = TOTAL;
   else RETURN_NACK(reply_buf, "UNRECOGNIZED_TYPE");
 
   // "Convert" from string to enum value.
