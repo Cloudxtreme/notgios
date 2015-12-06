@@ -10,7 +10,7 @@ module Notgios
     # Enforce Authentication before handling routes.
     before do
       # Exclude the login and sign up routes.
-      pass if %w{ sign_in sign_up tasks alarms contacts }.include?(request.path_info.split('/')[1]) || request.path_info.split('/')[1].nil?
+      pass if %w{ sign_in sign_up tasks alarms }.include?(request.path_info.split('/')[1]) || request.path_info.split('/')[1].nil?
 
       token = request.cookies['token']
       begin
@@ -90,6 +90,18 @@ module Notgios
       end
     end
 
+    post '/delete_job' do
+      Helpers.with_nodis do |nodis|
+        byebug
+        cmd = CommandStruct.new
+        params.each_pair { |key, value| cmd.send(key + '=', value) rescue next }
+        stop = CommandStruct.new(cmd.id, :delete, params['server'])
+        MIDDLEMAN.enqueue_command(stop)
+        nodis.delete_job(params['username'], cmd.id)
+        200
+      end
+    end
+
     get '/get_tasks' do
       Helpers.with_nodis do |nodis|
         tasks = nodis.get_jobs_for_user(params['username']).map do |task|
@@ -122,6 +134,16 @@ module Notgios
       Helpers.with_nodis do |nodis|
         begin
           nodis.get_recent_metrics(params['task_id'], params['username'], params['count'] || 100).to_json
+        rescue
+          halt 400
+        end
+      end
+    end
+
+    get '/get_alarms' do
+      Helpers.with_nodis do |nodis|
+        begin
+          nodis.get_alarms(params['username']).to_json
         rescue
           halt 400
         end

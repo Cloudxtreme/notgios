@@ -1,1 +1,27 @@
-<h1>And this is the one with the alarms!</h1>
+<div ng-controller="alarmController">
+  <div ng-if="loggedIn()" class="container-fluid">
+    <div class="panel panel-primary" ng-if="alarmData == undefined">
+      <div class="panel-heading">
+        <h3 class="panel-title">Loading...</h3>
+      </div>
+      <div class="panel-body">
+        <p>Alarms are being loaded...</p>
+      </div>
+    </div>
+    <div class="panel panel-primary" ng-if="alarmData.length == 0">
+      <div class="panel-heading">
+        <h3 class="panel-title">Some Task</h3>
+      </div>
+      <div class="panel-body">
+        <p>You don't have any tasks defined! You'll need to add at least one before adding any alarms.</p>
+      </div>
+    </div>
+    <alarm-table
+      alarms="alarmData">
+    </alarm-table>
+
+  </div>
+  <div ng-if="!loggedIn()" class="container-fluid">
+
+  </div>
+</div>

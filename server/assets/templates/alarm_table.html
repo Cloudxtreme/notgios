@@ -1,0 +1,25 @@
+<div class="panel panel-primary" ng-repeat="task in alarmData">
+  <div class="panel-heading">
+    <h3>Task {{ task.id }}</h3>
+  </div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Type</th>
+        <th>Threshold</th>
+        <th>Time Period</th>
+        <th>Phone</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr ng-repeat="alarm in task.alarms">
+        <th>{{ alarm.id }}</th>
+        <th>{{ alarm.type }}</th>
+        <th>{{ alarm.threshold }}</th>
+        <th>{{ alarm.window }}</th>
+        <th>{{ alarm.phone }}</th>
+      </tr>
+    </tbody>
+  </table>
+</div>

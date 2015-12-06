@@ -213,7 +213,15 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
     }, function failure(response) {
       $scope.taskErrorMessage = 'Currently unable to contact the server, please check your connection.';
     });
-  }
+  };
+
+  $scope.deleteTask = function () {
+    authenticated.sendData('delete_job', $scope.shownTask, function success(response) {
+      $('#config-modal').modal('hide');
+    }, function failure(response) {
+      $scope.taskErrorMessage = 'Currently unable to contact the server, please check your connection.';
+    });
+  };
 
   $scope.upcase = function (word) {
     if (word == undefined || word == null) return;
@@ -278,11 +286,17 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
 
 }]);
 
-notgios.controller('alarmController', ['$scope', '$http', function ($scope, $http) {
+notgios.controller('alarmController', ['$scope', '$interval', 'authenticated', function ($scope, $interval, authenticated) {
 
-}]);
+  $scope.loggedIn = authenticated.loggedIn;
 
-notgios.controller('contactController', ['$scope', '$http', function ($scope, $http) {
+  $scope.alarmInterval = $interval(function alarmInterval() {
+    authenticated.getData('get_alarms', function success(response) {
+      $scope.alarmData = response.data;
+    }, function failure(response) {
+      $scope.alarmMessage = 'Currently unable to contact server, please check your connection.';
+    });
+  }, 1000);
 
 }]);
 
@@ -368,23 +382,34 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
 notgios.directive('serverTable', function () {
   return {
     templateUrl: '/templates/server_table.html',
-  replace: true,
-  scope: {
-    servers: "=servers",
-  status: "=connected",
-  showServer: "=callback",
-  title: "=header"
-  }
+    replace: true,
+    scope: {
+      servers: "=servers",
+      status: "=connected",
+      showServer: "=callback",
+      title: "=header"
+    }
   };
 });
 
 notgios.directive('taskTable', function () {
   return {
     templateUrl: '/templates/task_table.html',
-  replace: true,
-  scope: {
-    taskData: "=tasks",
-  showVis: "=callback"
-  }
+    replace: true,
+    scope: {
+      taskData: "=tasks",
+      showVis: "=callback"
+    }
+  };
+});
+
+notgios.directive('alarmTable', function () {
+  return {
+    templateUrl: '/templates/alarm_table.html',
+    replace: true,
+    scope: {
+      alarmData: "=alarms",
+      showAlarm: "=callback"
+    }
   };
 });

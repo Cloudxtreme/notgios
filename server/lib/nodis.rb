@@ -329,6 +329,29 @@ module Notgios
       lrange("notgios.reports.#{id}", 0, count).map { |resp| JSON.parse(resp) }
     end
 
+    # Alarm Commands
+
+    def add_alarm(username, alarm)
+      raise NoSuchResourceError, "User does not exist" unless exists("notgios.users.#{username}")
+      multi do
+        id = next_id
+        alarm['id'] = id
+        sadd("notgios.users.#{username}.alarms", id)
+        hmset("notgios.alarms.#{id}", *alarm)
+      end
+    end
+
+    def update_alarm(alarm)
+      hmset("notgios.alarms.#{alarm['id']}", *alarm)
+    end
+
+    def get_alarms(username)
+      raise NoSuchResourceError, "User does not exist" unless exists("notgios.users.#{username}")
+      smembers("notgios.users.#{username}.alarms").map do |alarm|
+        hgetall("notgios.alarms.#{alarm}")
+      end
+    end
+
     # Helpers
 
     def next_id
