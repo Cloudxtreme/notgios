@@ -468,11 +468,7 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
   fclose(global_stats);
 
   // Make sure the scanning was successful, and calculate our first values.
-  if (retvals[0] != 2 || retvals[1] != 4) {
-    fclose(pid_stats);
-    fclose(global_stats);
-    return NOTGIOS_NOPROC;
-  }
+  if (retvals[0] != 2 || retvals[1] != 5) return NOTGIOS_NOPROC;
   start_pid_total = start_pid_user + start_pid_sys;
   start_global_total = start_user + start_nice + start_sys + start_idle + start_io;
 
@@ -497,11 +493,7 @@ int process_cpu_collect(uint16_t pid, task_report_t *data) {
   fclose(global_stats);
 
   // Same deal as before.
-  if (retvals[0] != 2 || retvals[1] != 4) {
-    fclose(pid_stats);
-    fclose(global_stats);
-    return NOTGIOS_NOPROC;
-  }
+  if (retvals[0] != 2 || retvals[1] != 5) return NOTGIOS_NOPROC;
   end_pid_total = end_pid_user + end_pid_sys;
   end_global_total = end_user + end_nice + end_sys + end_idle + end_io;
 
