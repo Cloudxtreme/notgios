@@ -320,7 +320,7 @@ module Notgios
     def get_recent_metrics(id, username = nil, count = 100)
       raise WrongUserError, "Job #{id} does not belong to user #{username}" unless username.nil? || sismember("notgios.users.#{username}.jobs", id)
       raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
-      zrange("notgios.metrics.#{id}", -count, -1, with_scores: true).map do |resp|
+      zrange("notgios.reports.#{id}", -count, -1, with_scores: true).map do |resp|
         report = JSON.parse(resp.first)
         report['timestamp'] = resp.last
         report

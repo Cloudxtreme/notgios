@@ -1,4 +1,5 @@
 *.swp
+*.swo
 *.rdb
 *.o
 *.DS_Store

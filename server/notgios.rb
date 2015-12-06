@@ -95,7 +95,7 @@ module Notgios
     get '/get_metrics/:task_id' do
       Helpers.with_nodis do |nodis|
         begin
-          nodis.get_recent_metrics(params['task_id'], params['username'], params['count'] || 100)
+          nodis.get_recent_metrics(params['task_id'], params['username'], params['count'] || 100).to_json
         rescue
           halt 400
         end

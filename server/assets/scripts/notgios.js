@@ -136,11 +136,16 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
     if ($scope.taskData && $scope.taskData.length > 0) {
       for (var i = 0; i < $scope.taskData.length; i++) {
         (function (num) {
-          authenticated.getData('get_metrics/' + num, function success(response) {
-            $scope.metrics[num] = response.data;
-          }, function failure(response) {
-            $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
-          });
+          var server = $scope.taskData[num];
+          for (var k = 0; k < server.tasks.length; k++) {
+            (function (taskNum) {
+              authenticated.getData('get_metrics/' + server.tasks[taskNum].id, function success(response) {
+                $scope.metrics[server.address] = response.data
+              }, function failure(response) {
+                $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
+              });
+            })(k);
+          }
         })(i);
       }
     }
