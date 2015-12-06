@@ -65,6 +65,31 @@ module Notgios
       end
     end
 
+    post '/update_job' do
+      Helpers.with_nodis do |nodis|
+        cmd = CommandStruct.new
+        params.each_pair { |key, value| cmd.send(key + '=', value) rescue next }
+        sanitized = cmd.options.map do |key, value| 
+          case key.upcase
+          when 'KEEPALIVE'
+            "#{key.upcase} #{value.to_s.upcase}"
+          else
+            "#{key.upcase} #{value}"
+          end
+        end
+        cmd.options = sanitized
+        cmd.command = :add
+        if cmd.id.exists?
+          stop = CommandStruct.new(cmd.id, :delete, params['server'], nil, nil, nil, nil)
+          MIDDLEMAN.enqueue_command(stop)
+          nodis.update_job(params['username'], cmd)
+        else
+          nodis.add_job(params['username'], cmd)
+        end
+        MIDDLEMAN.enqueue_command(cmd)
+      end
+    end
+
     get '/get_tasks' do
       Helpers.with_nodis do |nodis|
         tasks = nodis.get_jobs_for_user(params['username']).map do |task|
@@ -79,7 +104,8 @@ module Notgios
           JSON.parse(task['options']).each do |option|
             index = option.index(' ')
             key = option[0...index]
-            remapped[:options][key] = option[(index + 1)..-1]
+            remapped[:options][key.downcase] = option[(index + 1)..-1]
+            remapped[:options][key.downcase] = remapped[:options][key.downcase].downcase.to_b if key.downcase == 'keepalive'
           end
           remapped
         end

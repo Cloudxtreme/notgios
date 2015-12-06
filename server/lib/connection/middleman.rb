@@ -36,9 +36,12 @@ module Notgios
       end
 
       # Function used by server to send a command to a monitor.
-      def enqueue_command(address, command)
+      def enqueue_command(command)
         @logger.debug('MiddleMan: Enqueuing a command from the server...')
-        @connection_lock.synchronize { @conntions[address].queue.push(command) }
+        @connection_lock.synchronize do
+          return unless @connections.keys.include?(command.server)
+          @connections[command.server].queue.push(command)
+        end
       end
 
       # Function used by server to read any errors sent by monitors.
@@ -67,8 +70,8 @@ module Notgios
           socket.write([
             "NGS JOB ADD",
             "ID #{cmd.id}",
-            "TYPE #{cmd.type}",
-            "METRIC #{cmd.metric}",
+            "TYPE #{cmd.type.upcase}",
+            "METRIC #{cmd.metric.upcase}",
             "FREQ #{cmd.freq}"
           ].concat(cmd.options))
         when :pause

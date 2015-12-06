@@ -72,7 +72,6 @@ module Notgios
     # job - CommandStruct
     def add_job(username, job)
       raise WrongUserError, "Server #{job.server} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", job.server)
-      byebug
       job.id = incr('notgios.id')
       sadd("notgios.users.#{username}.jobs", job.id)
       job_hash = job.to_h

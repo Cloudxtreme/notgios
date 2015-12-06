@@ -152,7 +152,7 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
   }, 1000);
 
   $scope.hasOptions = function (task) {
-    !$.isEmptyObject(task);
+    return !$.isEmptyObject(task.options);
   };
 
   $scope.$on('$destroy', function destruct() {
@@ -160,10 +160,40 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
   });
 
   $scope.showConfig = function (task, server) {
-    if (task.type == undefined) task.type = 'process';
+    if (task.type == undefined) {
+      task.type = 'process';
+      task.options = {};
+    }
     $scope.shownTask = task;
     $scope.shownServer = server;
   };
+
+  $scope.saveTask = function () {
+    var sanitized = {};
+    for (var option in $scope.shownTask.options) {
+      if ($scope.shownTask.options.hasOwnProperty(option)) {
+        switch ($scope.shownTask.type) {
+          case 'process':
+            if (option == 'keepalive' || option == 'runcmd' || option == 'pidfile') {
+              sanitized[option] = $scope.shownTask.options[option];
+            }
+            break;
+          case 'directory':
+            if (option == 'path') sanitized['path'] = $scope.shownTask.options['path']
+            break;
+        }
+      }
+    }
+    $scope.shownTask.options = sanitized;
+    var data = JSON.parse(JSON.stringify($scope.shownTask));
+    data.server = $scope.shownServer.address;
+
+    authenticated.sendData('update_job', data, function success(response) {
+      $('#config-modal').modal('hide');
+    }, function failure(response) {
+      $scope.taskErrorMessage = 'Currently unable to contact the server, please check your connection.';
+    });
+  }
 
   $scope.upcase = function (word) {
     if (word == undefined || word == null) return;
@@ -300,7 +330,7 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
   }
 
   // I should have Angular do the form validation for me, but I don't have time to figure it out right now.
-  $scope.signUp = function ($event) {
+  $scope.signUp = function () {
     if ($scope.username && $scope.username.length > 0 && $scope.password && $scope.password.length > 0) {
       if ($scope.password == $scope.passConfirm && $scope.contact && $scope.contact.length > 0) {
         $http({
@@ -308,23 +338,21 @@ notgios.controller('signupController', ['$scope', '$http', 'authenticated', func
           url: '/sign_up',
           data: {
             username: $scope.username,
-          password: $scope.password,
-          contact: $scope.contact
+            password: $scope.password,
+            contact: $scope.contact
           }
         }).then(function success(response) {
           $scope.submissionError = '';
+          $('#signup-modal').modal('hide');
           authenticated.logIn(response.data);
         }, function failure(response) {
-          $event.stopPropagation();
           if (response.status == 400) $scope.submissionError = 'A user with that name already exists. Please pick another';
           else $scope.submissionError = 'There was an error during submission. Please check your internet and try again.';
         });
       } else {
-        $event.stopPropagation();
         $scope.submissionError = 'The form did not pass validation. Please check your entries and try again.'
       }
     } else {
-      $event.stopPropagation();
       $scope.submissionError = 'The form did not pass validation. Please check your entries and try again.'
     }
   };

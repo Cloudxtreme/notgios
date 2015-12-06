@@ -65,7 +65,7 @@
     </nav>
 
     <!-- Login/Signup Dropdown -->
-    <div ng-controller="signupController" class="modal fade signup-modal" tabindex="-1" role="dialog">
+    <div ng-controller="signupController" class="modal fade signup-modal" id="signup-modal" tabindex="-1" role="dialog">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
@@ -105,7 +105,7 @@
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
-            <button ng-click="signUp($event)" type="submit" data-dismiss="modal" class="btn btn-primary">Sign Up</button>
+            <button ng-click="signUp($event)" type="submit" class="btn btn-primary">Sign Up</button>
           </div>
         </div>
       </div>
