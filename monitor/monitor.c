@@ -560,12 +560,14 @@ void handle_reschedule(char *cmd, char *reply_buf, task_action_t action) {
   pthread_mutex_unlock(&control->mutex);
 
   if (action == DELETE) {
+    int retvals[2];
     task = hash_get(&threads, id_str);
     pthread_join(*task, NULL);
-    int retval = hash_drop(&threads, id_str);
+    retvals[0] = hash_drop(&threads, id_str);
+    retvals[1] = hash_drop(&controls, id_str);
 
     // This can only happen if we've received a SIGTERM.
-    if (retval == HASH_FROZEN) RETURN_NACK(reply_buf, "SHUTDOWN");
+    if (retvals[0] == HASH_FROZEN || retvals[1] == HASH_FROZEN) RETURN_NACK(reply_buf, "SHUTDOWN");
   }
 
   // Write acknowledgement.
