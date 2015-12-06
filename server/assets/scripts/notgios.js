@@ -146,6 +146,10 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
     }
   }, 1000);
 
+  $scope.hasOptions = function (task) {
+    !$.isEmptyObject(task);
+  };
+
   $scope.$on('$destroy', function destruct() {
     $interval.cancel($scope.dataInterval);
   });

@@ -70,7 +70,7 @@ module Notgios
         tasks = nodis.get_jobs_for_user(params['username']).map do |task|
           remapped = {
             id: task['id'],
-            address: task['address'],
+            address: task['server'],
             type: task['type'].downcase,
             metric: task['metric'].downcase,
             freq: task['freq'],
@@ -81,13 +81,14 @@ module Notgios
             key = option[0...index]
             remapped[:options][key] = option[(index + 1)..-1]
           end
+          remapped
         end
         nodis.get_servers(params['username']).map do |server|
           subtasks = Array.new
-          tasks.delete_if { |task| subtasks.push(task) if task.server == server.address }
+          tasks.delete_if { |task| subtasks.push(task) if task[:address] == server['address'] }
           server['tasks'] = subtasks
           server
-        end
+        end.to_json
       end
     end
 

@@ -9,7 +9,7 @@
         <th>Type</th>
         <th>Metric</th>
         <th>Frequency</th>
-        <th>Task Specific</th>
+        <th>Task Specific Option</th>
         <th>Graphs</th>
         <th>Config</th>
       </tr>
@@ -22,6 +22,7 @@
         <th>{{ task.freq }} seconds</th>
         <th ng-if="task.type == 'process'">{{ task.options['runcmd'] }}</th>
         <th ng-if="task.type == 'directory'">{{ task.options['path'] }}</th>
+        <th ng-if="!hasOptions(task)">N/A</th>
         <th><a data-target="#vis-modal" data-toggle="modal" ng-click="$parent.showVis(task)">View Graphs</a></th>
         <th><a data-target="#config-modal" data-toggle="modal" ng-click="$parent.showConfig(task, server)">Details</a></th>
       </tr>
