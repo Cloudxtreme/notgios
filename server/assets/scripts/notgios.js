@@ -1,4 +1,4 @@
-var notgios = angular.module('notgios', ['ngRoute', 'ngCookies']);
+var notgios = angular.module('notgios', ['ngRoute', 'ngCookies', 'initialValue']);
 
 notgios.config(['$routeProvider', '$locationProvider', function ($routeProvider, $locationProvider) {
   $routeProvider.when('/', {
@@ -40,7 +40,8 @@ notgios.factory('authenticated', ['$cookies', '$http', function ($cookies, $http
     if ($cookies.get('token') != null) {
       $http({
         method: 'POST',
-        url: url
+        url: url,
+        data: data
       }).then(success, failure);
     }
   };
@@ -64,16 +65,19 @@ notgios.controller('homeController', ['$scope', '$interval', 'authenticated', fu
 
   $scope.loggedIn = authenticated.loggedIn;
   $scope.serverData = {};
+  $scope.server = {};
 
   $scope.dataInterval = $interval(function dataInterval() {
     authenticated.getData('get_servers', function success(response) {
       for (var i = 0; i < response.data.connectedServers.length; i++) {
         server = response.data.connectedServers[i];
-        server.lastSeen = new Date(server.lastSeen);
+        if (server.lastSeen) server.lastSeen = new Date(server.lastSeen);
+        else server.lastSeen = 'Never';
       }
       for (var i = 0; i < response.data.disconnectedServers.length; i++) {
         server = response.data.disconnectedServers[i];
-        server.lastSeen = new Date(server.lastSeen);
+        if (server.lastSeen) server.lastSeen = new Date(server.lastSeen);
+        else server.lastSeen = 'Never';
       }
       $scope.serverData = response.data;
     }, function failure(response) {
@@ -87,6 +91,32 @@ notgios.controller('homeController', ['$scope', '$interval', 'authenticated', fu
 
   $scope.showServer = function (server) {
     $scope.shownServer = server;
+    $scope.server.serverName = server.name;
+    $scope.server.serverAddress = server.address;
+    $scope.server.sshPort = server.sshPort;
+  };
+
+  $scope.saveServer = function ($event) {
+    $event.stopPropagation();
+    var url;
+    if ($scope.shownServer) url = 'update_server';
+    else url = 'add_server';
+    authenticated.sendData(url, $scope.server, function success(response) {
+      $('#server-modal').modal('hide');
+      $scope.shownServer = null;
+    }, function failure(response) {
+      $scope.modalMessage = 'There was an error saving the server, please check your internet connection.';
+    });
+  };
+
+  $scope.deleteServer = function (server) {
+    authenticated.sendData('delete_server', server, function success(response) {
+      $('#server-modal').modal('hide');
+      $scope.shownServer = null;
+      $scope.server = {};
+    }, function failure(response) {
+      $scope.modalMessage = 'There was an error saving the server, please check your internet connection.';
+    });
   };
 
 }]);

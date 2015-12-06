@@ -32,10 +32,32 @@ module Notgios
       erb :index
     end
 
+    post '/add_server' do
+      Helpers.with_nodis do |nodis|
+        starting_job = CommandStruct.new(nodis.next_id, :add, params['serverAddress'], 'TOTAL', 600, 'CPU', [])
+        nodis.add_server(params['username'], starting_job, params['serverAddress'], params['serverName'], params['sshPort'])
+        MIDDLEMAN.add_server(params['address'], starting_job)
+      end
+    end
+
+    post '/update_server' do
+      Helpers.with_nodis do |nodis|
+        nodis.update_server(params['username'], params['serverAddress'], params['serverName'], params['sshPort'])
+        200
+      end
+    end
+
+    post '/delete_server' do
+      Helpers.with_nodis do |nodis|
+        nodis.delete_server(params['username'], params['address'])
+        200
+      end
+    end
+
     get '/get_servers' do
       Helpers.with_nodis do |nodis|
         connected, disconnected = Array.new, Array.new
-        nodis.get_servers(params['username']).each { |server| server.connected.to_b ? connected.push(server) : disconnected.push(server) }
+        nodis.get_servers(params['username']).each { |server| server['connected'].to_b ? connected.push(server) : disconnected.push(server) }
         {
           connectedServers: connected,
           disconnectedServers: disconnected

@@ -28,9 +28,11 @@ module Notgios
       end
 
       # Add an initial monitor task for this server when it joins.
-      def add_server(address, id)
-        cmd = CommandStruct.new(id, :add, address, 'TOTAL', 600, 'CPU', [])
-        @connection_lock.synchronize { @connections[address] = MonitorStruct.new(nil, [cmd], Queue.new, address) }
+      def add_server(address, starting_job)
+        Helpers.with_nodis do |nodis|
+          @connection_lock.synchronize { @connections[address] = MonitorStruct.new(nil, [starting_job], Queue.new, address) }
+          @logger.debug("MiddleMan: Added server #{address}...")
+        end
       end
 
       # Function used by server to send a command to a monitor.

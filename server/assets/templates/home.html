@@ -6,12 +6,13 @@
           <h3 class="panel-title">Servers</h3>
         </div>
         <div class="panel-body">
-          <div ng-if="$parent.serverData.connectedServers == undefined">
-            <p>Servers are being loaded...</p>
-          </div>
-          <div ng-if="$parent.serverData.connectedServers.length == 0">
-            <p>You don't have any servers! Try <a href="#" data-target="#server-modal" data-toggle="modal">adding one</a>!</p>
-          </div>
+          <p ng-if="$parent.serverData.connectedServers == undefined">Servers are being loaded...</p>
+          <p ng-if="$parent.serverData.connectedServers.length == 0 && $parent.serverData.disconnectedServers.length == 0">
+            You don't have any servers! Try <a href="#" data-target="#server-modal" data-toggle="modal">adding one</a>!
+          </p>
+          <p ng-if="$parent.serverData.connectedServers.length == 0 && $parent.serverData.disconnectedServers.length > 0">
+            You don't have any connected servers! Make sure all of your added ones are turned on, or try <a href="#" data-target="#server-modal" data-toggle="modal">adding one</a>!
+          </p>
         </div>
       </div>
     </div>
@@ -41,18 +42,23 @@
           </div>
           <div class="modal-body">
             <div class="input-group">
-              <span class="input-group-addon" id="server-name-addon">Server Name&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-              <input type="text" class="form-control" value="{{ shownServer.name }}">
+              <span class="input-group-addon" id="server-name-addon">Server Name&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+              <input type="text" class="form-control" ng-model="server.serverName">
             </div>
             <div class="input-group below">
               <span class="input-group-addon" id="address-addon">Server IP Address</span>
-              <input type="text" class="form-control" value="{{ shownServer.address }}" ng-disabled="shownServer">
+              <input type="text" class="form-control" ng-model="server.serverAddress" ng-disabled="shownServer">
+            </div>
+            <div class="input-group below">
+              <span class="input-group-addon" id="port-addon">SSH Port&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+              <input type="text" class="form-control" ng-model="server.sshPort">
             </div>
             <button type="button" class="btn btn-danger below" ng-if="shownServer" ng-click="deleteServer(shownServer)">Delete</button>
+            <p class="error-message below">{{ modalMessage }}</p>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-default" type="button" data-dismiss="modal">Cancel</button>
-            <button class="btn btn-primary" type="submit" data-dismiss="modal">{{ shownServer && "Update" || "Save" }}</button>
+            <button class="btn btn-default" type="button" data-dismiss="modal" ng-click="shownServer = null">Cancel</button>
+            <button class="btn btn-primary" ng-click="saveServer($event)" type="submit" data-dismiss="modal">{{ shownServer && "Update" || "Save" }}</button>
           </div>
         </div>
       </div>

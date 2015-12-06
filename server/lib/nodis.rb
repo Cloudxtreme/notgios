@@ -71,12 +71,13 @@ module Notgios
     # address - String
     # job - CommandStruct
     def add_job(username, job)
-      raise WrongUserError, "Server #{job.address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", job.address)
+      raise WrongUserError, "Server #{job.server} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", job.server)
+      byebug
       job.id = incr('notgios.id')
       sadd("notgios.users.#{username}.jobs", job.id)
       job_hash = job.to_h
       job_hash.delete('command')
-      job_hash['options'] = job_hash['options'].to_json
+      job_hash[:options] = job_hash[:options].to_json
       hmset("notgios.jobs.#{job.id}", *job_hash)
     end
 
@@ -213,12 +214,24 @@ module Notgios
     # address - String, ip address of server
     # name - Name given to server by the user.
     # ssh_port - Fixnum
-    def add_server(username, address, name, ssh_port = 22)
+    def add_server(username, starting_job, address, name, ssh_port = 22)
       raise ResourceExistsError if exists("notgios.servers.#{address}")
-      sadd("notgios.users.#{username}.servers", address)
-      hset("notgios.servers.#{address}", 'name', name)
-      hset("notgios.servers.#{address}", 'address', address)
-      hset("notgios.servers.#{address}", 'ssh_port', ssh_port)
+      multi do
+        sadd("notgios.users.#{username}.servers", address)
+        hset("notgios.servers.#{address}", 'name', name)
+        hset("notgios.servers.#{address}", 'address', address)
+        hset("notgios.servers.#{address}", 'ssh_port', ssh_port)
+        hset("notgios.servers.#{address}", 'connected', false)
+      end
+      add_job(username, starting_job)
+    end
+
+    def update_server(username, address, name, ssh_port)
+      raise WrongUserError, "Server #{address} is not owned by used #{username}" unless sismember("notgios.users.#{username}.servers", address)
+      multi do
+        hset("notgios.servers.#{address}", 'name', name)
+        hset("notgios.servers.#{address}", 'ssh_port', ssh_port)
+      end
     end
 
     # This is left unauthenticated because it's only to be called from the MiddleMan.
@@ -257,7 +270,11 @@ module Notgios
       raise NoSuchResourceError, "User #{username} does not exist" unless exists("notgios.users.#{username}")
       servers = Array.new
       smembers("notgios.users.#{username}.servers").each { |address| servers.push(hgetall("notgios.servers.#{address}")) }
-      servers
+      servers.map do |server|
+        port = server.delete('ssh_port')
+        server['sshPort'] = port
+        server
+      end
     end
 
     # Expects:
@@ -266,9 +283,15 @@ module Notgios
     def delete_server(username, address)
       raise WrongUserError, "Server #{address} is not owned by user #{username}" unless sismember("notgios.users.#{username}.servers", address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
+      jobs = Array.new
+      smembers("notgios.users.#{username}.jobs").each { |id| jobs.push(id) if hget("notgios.jobs.#{id}", 'server') == address }
       multi do
         srem("notgios.users.#{username}.servers", address)
         del("notgios.servers.#{address}")
+        jobs.each do |job|
+          srem("notgios.users.#{username}.jobs", job)
+          del("notgios.jobs.#{job}")
+        end
       end
     end
 
@@ -302,6 +325,12 @@ module Notgios
         report['timestamp'] = resp.last
         report
       end
+    end
+
+    # Helpers
+
+    def next_id
+      incr('notgios.id')
     end
 
   end
