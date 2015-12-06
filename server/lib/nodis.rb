@@ -129,7 +129,9 @@ module Notgios
     def update_job(username, job)
       raise WrongUserError, "Job #{job.id} is not owned by user #{username}" unless sismember("notgios.users.#{username}.jobs", job.id)
       raise NoSuchResourceError, "Job #{job.id} does not exist" unless exists("notgios.jobs.#{job.id}")
-      hmset("notgios.jobs.#{job.id}", *job.to_h.delete('command'))
+      job_hash = job.to_h
+      job_hash.delete('command')
+      hmset("notgios.jobs.#{job.id}", *job.to_h)
     end
 
     # Expects:
@@ -152,7 +154,7 @@ module Notgios
           # Grab the CPU usage and add it to the zset.
           percent = report.shift.scan(/CPU PERCENT (\d+\.\d+)/)
           if percent.exists? && percent.first.exists?
-            zadd("notgios.reports.#{id}", timestamp.to_i, { cpu: percent.first.first }.to_json)
+            lpush("notgios.reports.#{id}", { cpu: percent.first.first, timestamp: timestamp.to_i }.to_json)
           else
             raise InvalidJobError, 'CPU field of job report was malformed'
           end
@@ -160,7 +162,7 @@ module Notgios
           # Grab the memory usage and add it to the zset.
           memory = report.shift.scan(/BYTES (\d+)/)
           if memory.exists? && memory.first.exists?
-            zadd("notgios.reports.#{id}", timestamp.to_i, { bytes: memory.first.first }.to_json)
+            lpush("notgios.reports.#{id}", { bytes: memory.first.first, timestamp: timestamp.to_i }.to_json)
           else
             raise InvalidJobError, 'BYTES field of job report was malformed'
           end
@@ -175,7 +177,7 @@ module Notgios
           # Grab the memory usage and add it to the zset.
           memory = report.shift.scan(/BYTES (\d+)/)
           if memory.exists? && memory.first.exists?
-            zadd("notgios.reports.#{id}", timestamp.to_i, { bytes: memory.first.first }.to_json)
+            lpush("notgios.reports.#{id}", { bytes: memory.first.first, timestamp: timestamp.to_i }.to_json)
           else
             raise InvalidJobError, 'BYTES field of job report was malformed'
           end
@@ -245,6 +247,11 @@ module Notgios
     def mark_disconnected(address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
       hset("notgios.servers.#{address}", 'connected', 'false')
+    end
+
+    def server_seen(address)
+      raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
+      hset("notgios.servers.#{address}", 'lastSeen', Time.now.to_i)
     end
 
     # Expects:
@@ -319,7 +326,7 @@ module Notgios
     def get_recent_metrics(id, username = nil, count = 100)
       raise WrongUserError, "Job #{id} does not belong to user #{username}" unless username.nil? || sismember("notgios.users.#{username}.jobs", id)
       raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
-      zrange("notgios.reports.#{id}", -count, -1, with_scores: true).map do |resp|
+      lrange("notgios.reports.#{id}", 0, count).map do |resp|
         report = JSON.parse(resp.first)
         report['timestamp'] = resp.last
         report

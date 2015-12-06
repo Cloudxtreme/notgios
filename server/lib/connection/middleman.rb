@@ -128,9 +128,9 @@ module Notgios
         end
 
         id = message[1].scan(/\d+/).first.to_i
-        if message[2].index('FATAL').exists? || message[2].index('ERROR').exists?
+        if message[3].index('FATAL').exists? || message[3].index('ERROR').exists?
           # We've encountered an error. Push it onto the error queue, remove if necessary, and move on.
-          if message[2].index('FATAL').exists?
+          if message[3].index('FATAL').exists?
             severity = :fatal
             monitor.tasks.delete_if { |task| task.id == id }
             @logger.error("MiddleMan Handler: Monitor sent a FATAL message for task #{id}, removing task...")
@@ -138,7 +138,7 @@ module Notgios
             severity = :error
             @logger.error("MiddleMan Handler: Monitor sent an ERROR message for task #{id}, enqueuing...")
           end
-          cause = message[2].scan(/\w+/)[2]
+          cause = message[3].scan(/\w+/)[2]
           @error_queue.push(ErrorStruct.new(id, cause, severity))
         else
           # We have a valid report, push the results onto the appropriate Redis list.
@@ -148,10 +148,13 @@ module Notgios
           @logger.debug('MiddleMan Handler: Received a valid job report, enqueuing...')
           begin
             nodis.post_job_report(id, message.slice(2..-1))
+            nodis.server_seen(monitor.address)
           rescue Nodis::InvalidJobError
             @logger.error('MiddleMan Handler: Invalid job report, dumping...')
+            @logger.error(message.inspect)
           rescue Nodis::UnsupportedJobError
             @logger.error('MiddleMan Handler: Unsupported job report, dumping...')
+            @logger.error(message.insepct)
           rescue Nodis::NoSuchResourceError
             @logger.debug('MiddleMan Handler: Task has been removed, but monitor hasn\'t been notified yet. Dumping report...')
           end

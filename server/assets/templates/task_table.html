@@ -20,7 +20,7 @@
         <th>{{ task.type }}</th>
         <th>{{ task.metric || "N/A" }}</th>
         <th>{{ task.freq }} seconds</th>
-        <th ng-if="task.type == 'process'">{{ task.options['runcmd'] }}</th>
+        <th ng-if="task.type == 'process'">{{ task.options['runcmd'] || task.options['pidfile'] }}</th>
         <th ng-if="task.type == 'directory'">{{ task.options['path'] }}</th>
         <th ng-if="!hasOptions(task)">N/A</th>
         <th><a data-target="#vis-modal" data-toggle="modal" ng-click="$parent.showVis(task)">View Graphs</a></th>

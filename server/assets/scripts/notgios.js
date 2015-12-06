@@ -70,13 +70,13 @@ notgios.controller('homeController', ['$scope', '$interval', 'authenticated', fu
   $scope.dataInterval = $interval(function dataInterval() {
     authenticated.getData('get_servers', function success(response) {
       for (var i = 0; i < response.data.connectedServers.length; i++) {
-        server = response.data.connectedServers[i];
-        if (server.lastSeen) server.lastSeen = new Date(server.lastSeen);
+        var server = response.data.connectedServers[i];
+        if (server.lastSeen) server.lastSeen = new Date(server.lastSeen * 1000);
         else server.lastSeen = 'Never';
       }
       for (var i = 0; i < response.data.disconnectedServers.length; i++) {
-        server = response.data.disconnectedServers[i];
-        if (server.lastSeen) server.lastSeen = new Date(server.lastSeen);
+        var server = response.data.disconnectedServers[i];
+        if (server.lastSeen) server.lastSeen = new Date(server.lastSeen * 1000);
         else server.lastSeen = 'Never';
       }
       $scope.serverData = response.data;
@@ -184,6 +184,7 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
         }
       }
     }
+    if ($scope.shownTask.type == 'directory') $scope.shownType.metric = 'memory'
     $scope.shownTask.options = sanitized;
     var data = JSON.parse(JSON.stringify($scope.shownTask));
     data.server = $scope.shownServer.address;
