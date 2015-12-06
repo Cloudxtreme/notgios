@@ -159,6 +159,18 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
     $interval.cancel($scope.dataInterval);
   });
 
+  $scope.showConfig = function (task, server) {
+    if (task.type == undefined) task.type = 'process';
+    $scope.shownTask = task;
+    $scope.shownServer = server;
+  };
+
+  $scope.upcase = function (word) {
+    if (word == undefined || word == null) return;
+    var character = word.charAt(0);
+    return character.toUpperCase() + word.substring(1, word.length);
+  };
+
   $scope.showVis = function (task) {
     $scope.shownVis = task;
     $('#highcharts').highcharts({
