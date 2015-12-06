@@ -125,6 +125,7 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
 
   $scope.loggedIn = authenticated.loggedIn;
   $scope.metrics = [];
+  $scope.metricCount = 100;
 
   $scope.dataInterval = $interval(function dataInterval() {
     authenticated.getData('get_tasks', function success(response) {
@@ -132,24 +133,42 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
     }, function failure(response) {
       $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
     });
-
-    if ($scope.taskData && $scope.taskData.length > 0) {
-      for (var i = 0; i < $scope.taskData.length; i++) {
-        (function (num) {
-          var server = $scope.taskData[num];
-          for (var k = 0; k < server.tasks.length; k++) {
-            (function (taskNum) {
-              authenticated.getData('get_metrics/' + server.tasks[taskNum].id, function success(response) {
-                $scope.metrics[server.address] = response.data
-              }, function failure(response) {
-                $scope.refreshMessage = 'Currently unable to contact the server, please check your connection.';
-              });
-            })(k);
-          }
-        })(i);
-      }
-    }
   }, 1000);
+
+  $scope.updateMetrics = function () {
+    authenticated.getData('get_metrics/' + $scope.shownVis.id + '?count=' + $scope.metricCount, function success(response) {
+      var found = -1;
+      for (var i = 0; i < response.data.length; i++) {
+        var metric = response.data[i];
+        if ($scope.metrics[0] && $scope.metrics[0].timestamp == metric.timestamp) {
+          found = i;
+          break;
+        }
+      }
+      if (found != 0) {
+        var series;
+        if ((series = $('#highcharts').highcharts().series[0]) == undefined) {
+          series = $('#highcharts').highcharts().addSeries('stuff');
+        }
+        if (found < 0) found = response.data.length;
+        var subset = response.data.slice(0, found);
+        var key;
+        for (var k in subset[0]) {
+          if (subset[0].hasOwnProperty(k) && k != 'timestamp') {
+            key = k;
+            break;
+          }
+        }
+        for (var i = 0; i < subset.length; i++) {
+          var point = subset[i];
+          series.addPoint([point.timestamp * 1000, parseInt(point[key])]);
+        }
+      }
+      $scope.metrics = response.data;
+    }, function failure(response) {
+      $scope.metricMessage = 'Current unable to contact the server, please check your connection.';
+    });
+  };
 
   $scope.hasOptions = function (task) {
     return !$.isEmptyObject(task.options);
@@ -204,72 +223,58 @@ notgios.controller('taskController', ['$scope', '$interval', 'authenticated', fu
 
   $scope.showVis = function (task) {
     $scope.shownVis = task;
+    $scope.collectMetrics = true;
+    var yAxisName, suffix;
+    switch (task.type) {
+      case 'process', 'total':
+        if (task.metric == 'cpu') {
+          yAxisName = 'Percentage CPU Used';
+          suffix = '% CPU';
+        } else {
+          yAxisName = 'Bytes Used';
+          suffix = ' Bytes';
+        }
+        break;
+      case 'directory':
+        yAxisName = 'Bytes Used';
+        suffix = ' Bytes';
+    }
     $('#highcharts').highcharts({
       chart: {
-        type: 'scatter',
-        margin: [70, 50, 60, 80],
-        events: {
-          click: function (e) {
-            // find the clicked values and the series
-            var x = e.xAxis[0].value,
-            y = e.yAxis[0].value,
-            series = this.series[0];
-
-            // Add it
-            series.addPoint([x, y]);
-          }
-        }
+        spacingTop: 0,
+        spacingLeft: 0,
+        spacingRight: 0,
+        spacingBottom: 0
       },
       title: {
-        text: 'User supplied data'
-      },
-      subtitle: {
-        text: 'Click the plot area to add a point. Click a point to remove it.'
+        text: $scope.upcase(task.type) + ' ' + $scope.upcase(task.metric) + ' Usage over time'
       },
       xAxis: {
-        gridLineWidth: 1,
-        minPadding: 0.2,
-        maxPadding: 0.2,
-        maxZoom: 60
+        type: 'datetime',
+        title: {
+          text: 'Time Taken'
+        }
       },
       yAxis: {
         title: {
-          text: 'Value'
-        },
-        minPadding: 0.2,
-        maxPadding: 0.2,
-        maxZoom: 60,
-        plotLines: [{
-          value: 0,
-          width: 1,
-          color: '#808080'
-        }]
-      },
-      legend: {
-        enabled: false
-      },
-      exporting: {
-        enabled: false
-      },
-      plotOptions: {
-        series: {
-          lineWidth: 1,
-          point: {
-            events: {
-              'click': function () {
-                if (this.series.data.length > 1) {
-                  this.remove();
-                }
-              }
-            }
-          }
+          text: yAxisName
         }
       },
-      series: [{
-        data: [[20, 20], [80, 80]]
-      }]
+      tooltip: {
+        valueSuffix: suffix
+      },
+      series: {
+        data: []
+      }
     });
+    $scope.metricInterval = $interval($scope.updateMetrics, 2000);
   };
+
+  $scope.hideVis = function () {
+    $interval.cancel($scope.metricInterval);
+    $scope.shownVis = null;
+    $scope.metrics.length = 0;
+  }
 
 }]);
 

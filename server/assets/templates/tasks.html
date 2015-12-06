@@ -22,16 +22,17 @@
     </task-table>
 
     <!-- Task Visualization Modal -->
-    <div class="modal fade" id="vis-modal" tabindex="-1" role="dialog">
+    <div class="modal fade" id="vis-modal" tabindex="-1" role="dialog" data-backdrop="static" data-keyboard="false">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
             <h4>Task {{ shownVis.id }} Graph</h4>
           </div>
           <div class="modal-body">
-            <div id="highcharts">
-              
-            </div>
+            <div id="highcharts"></div>
+          </div>
+          <div class="modal-footer">
+            <button ng-click="hideVis()" class="btn btn-primary" data-dismiss="modal" type="button">Dismiss</button>
           </div>
         </div>
       </div>
