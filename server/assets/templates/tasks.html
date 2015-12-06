@@ -39,7 +39,65 @@
 
     <!-- Task Configuration Modal -->
     <div class="modal fade" id="config-modal" tabindex="-1" role="dialog">
-
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4 ng-if="shownTask">Task {{ shownTask.id }} Config</h4>
+            <h4 ng-if="!shownTask">New Task Config</h4>
+          </div>
+          <div class="modal-body">
+            <h5>Task Configuration:</h5>
+            <div class="dropdown below">
+              <button class="btn btn-default dropdown-toggle" type="button" id="task-type-dropdown" data-toggle="dropdown">Task Type: {{ upcase(shownTask.type) || "Process" }} <span class="caret"></span></button>
+              <ul class="dropdown-menu">
+                <li><a href="#" ng-click="shownTask.type = 'process'">Process</a></li>
+                <li><a href="#" ng-click="shownTask.type = 'directory'">Directory</a></li>
+                <li><a href="#" ng-click="shownTask.type = 'total'">Total</a></li>
+              </ul>
+            </div>
+            <hr>
+            <div ng-if="shownTask.type == 'process'">
+              <p class="below">Should Notgios keep your process alive?</p>
+              <div class="btn-group">
+                <button ng-class="{ 'active': shownTask.options['keepalive'] == true }" ng-click="shownTask.options['keepalive'] = true" type="button" class="btn btn-default">Yes</button>
+                <button ng-class="{ 'active': shownTask.options['keepalive'] == false }" ng-click="shownTask.options['keepalive'] = false" type="button" class="btn btn-default">No</button>
+              </div>
+              <div ng-if="shownTask.options['keepalive']" class="input-group below">
+                <span class="input-group-addon" id="run-cmd-addon">Launch Command</span>
+                <input type="text" class="form-control" ng-model="shownTask.options['runcmd']">
+              </div>
+              <div class="input-group below">
+                <span class="input-group-addon" id="pidfile-addon">Location of pidfile&nbsp;</span>
+                <input type="text" class="form-control" ng-model="shownTask.options['pidfile']">
+              </div>
+            </div>
+            <div ng-if="shownTask.type == 'process' || shownTask.type == 'total'">
+              <p class="below">What would you like to measure?</p>
+              <div class="btn-group">
+                <button ng-class="{ 'active': shownTask.metric == 'cpu' }" ng-click="shownTask.metric = 'cpu'" type="button" class="btn btn-default">CPU Usage</button>
+                <button ng-class="{ 'active': shownTask.metric == 'memory' }" ng-click="shownTask.metric = 'memory'" type="button" class="btn btn-default">Memory Usage</button>
+              </div>
+            </div>
+            <div ng-if="shownTask.type == 'directory'">
+              <p class="below">What directory would you like to keep an eye on?</p>
+              <div class="input-group below">
+                <span class="input-group-addon">Fully Qualified Path</span>
+                <input type="text" class="form-control" ng-model="shownTask.options['path']">
+              </div>
+            </div>
+            <hr>
+            <div class="input-group below">
+              <span class="input-group-addon" id="freq-addon">Frequency of measurement</span>
+              <input type="text" class="form-control" ng-model="shownTask.freq">
+              <span class="input-group-addon">(s)</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-default" type="button" data-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary" ng-click="saveTask($event)" type="submit" data-dismiss="modal">{{ shownTask.id && 'Update' || 'Create' }}</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div ng-if="!loggedIn()" class="container-fluid">

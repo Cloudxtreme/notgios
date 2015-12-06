@@ -91,6 +91,7 @@ module Notgios
       hgetall("notgios.jobs.#{id}").each_pair do |key, value|
         job.send(key + '=', value)
       end
+      job.options = JSON.parse(options)
       job
     rescue NoMethodError, ArgumentError
       raise InvalidJobError, "Job #{id} exists but is malformatted"
@@ -115,7 +116,8 @@ module Notgios
           job_hash = hgetall("notgios.jobs.#{job}")
           command = CommandStruct.new
           job_hash.each_pair { |key, value| command.send(key + '=', value) }
-          jobs[job_hash['host']].push(command)
+          command.options = JSON.parse(command.options)
+          jobs[job_hash['server']].push(command)
         end
       end
       jobs
@@ -136,8 +138,8 @@ module Notgios
     # report - JSON String
     def post_job_report(id, report)
       raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
-      type = hget("notgios.jobs.#{id}", type)
-      metric = hget("notgios.jobs.#{id}", metric)
+      type = hget("notgios.jobs.#{id}", 'type')
+      metric = hget("notgios.jobs.#{id}", 'metric')
 
       # Grab the timestamp for the report.
       timestamp = report.shift.scan(/TIMESTAMP (\d+)/)
@@ -236,14 +238,12 @@ module Notgios
 
     # This is left unauthenticated because it's only to be called from the MiddleMan.
     def mark_connected(address)
-      raise WrongUserError, "Server #{address} is not owned by used #{username}" unless sismember("notgios.users.#{username}.servers", address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
       hset("notgios.servers.#{address}", 'connected', 'true')
     end
 
     # This is left unauthenticated because it's only to be called from the MiddleMan.
     def mark_disconnected(address)
-      raise WrongUserError, "Server #{address} is not owned by used #{username}" unless sismember("notgios.users.#{username}.servers", address)
       raise NoSuchResourceError, "Server #{address} does not exist" unless exists("notgios.servers.#{address}")
       hset("notgios.servers.#{address}", 'connected', 'false')
     end
@@ -320,7 +320,7 @@ module Notgios
     def get_recent_metrics(id, username = nil, count = 100)
       raise WrongUserError, "Job #{id} does not belong to user #{username}" unless username.nil? || sismember("notgios.users.#{username}.jobs", id)
       raise NoSuchResourceError, "Job #{id} does not exist" unless exists("notgios.jobs.#{id}")
-      zrange("notgios.metrics.#{id}", -count, -1, with_scores: true).map do |resp|
+      zrange("notgios.reports.#{id}", -count, -1, with_scores: true).map do |resp|
         report = JSON.parse(resp.first)
         report['timestamp'] = resp.last
         report
